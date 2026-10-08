@@ -598,7 +598,7 @@
           Alexa+ ERP Agent
           <span class="brand-badge">MCP Live</span>
         </div>
-        <small style="color: var(--text-dim); font-size: 0.72rem;">Model Context Protocol &bull; Amazon Bedrock Planner</small>
+        <small id="header-planner-subtext" style="color: var(--text-dim); font-size: 0.72rem;"><!--HEADER_PLANNER_SUBTEXT--></small>
       </div>
     </div>
 
@@ -625,9 +625,7 @@
       <button class="chip-btn" data-prompt="Check low stock items">
         ⚠️ Low Stock Alert
       </button>
-      <button class="chip-btn" data-prompt="Restock everything that's running low from the fastest supplier">
-        ⚡ Restock Fastest Supplier (Bedrock)
-      </button>
+      <button class="chip-btn" id="chip-restock-btn" data-prompt="Restock everything that's running low from the fastest supplier"><!--RESTOCK_BUTTON_LABEL--></button>
       <button class="chip-btn" data-prompt="Review pending leave requests">
         📅 Pending Leaves
       </button>
@@ -643,7 +641,7 @@
         <div class="avatar alexa">🎙️</div>
         <div class="message-body">
           <div class="speech-bubble">
-            <strong>Namaste!</strong> I am your <strong>Alexa+ ERP Voice Agent</strong>. You can speak or type to check pending invoices, inventory levels, approve leaves, or ask Bedrock to plan supply chain restocking. How can I help you today?
+            <strong>Namaste!</strong> I am your <strong>Alexa+ ERP Voice Agent</strong>. You can speak or type to check pending invoices, inventory levels, approve leaves, or plan supply chain restocking. How can I help you today?
           </div>
           <div class="speech-controls">
             <button class="replay-btn" onclick="speakText(this.parentElement.previousElementSibling.innerText)">
@@ -689,6 +687,21 @@
   <script>
     // State management
     const sessionId = "web_session_" + Math.random().toString(36).substring(2, 9);
+    let isLiveMode = /*DEFAULT_IS_LIVE*/ false;
+
+    function updatePlannerModeDisplay(mode) {
+      const headerSubtext = document.getElementById("header-planner-subtext");
+      const restockBtn = document.getElementById("chip-restock-btn");
+      if (mode === "bedrock") {
+        isLiveMode = true;
+        if (headerSubtext) headerSubtext.innerHTML = "Model Context Protocol &bull; Amazon Bedrock Planner (Live)";
+        if (restockBtn) restockBtn.textContent = "⚡ Restock Fastest Supplier (Bedrock)";
+      } else {
+        isLiveMode = false;
+        if (headerSubtext) headerSubtext.innerHTML = "Model Context Protocol &bull; Supply Chain Planner";
+        if (restockBtn) restockBtn.textContent = "⚡ Restock Fastest Supplier";
+      }
+    }
     let isTTSActive = true;
     let isRecognizing = false;
     let recognition = null;
@@ -1043,8 +1056,31 @@
         `;
       }
 
-      // 5. Amazon Bedrock Supply Chain Planner Card
+      // 5. Transparent Supply Chain Planner Card
       if (data.plan_steps && Array.isArray(data.plan_steps)) {
+        const mode = data.planner_mode || payload.planner_mode || (data.mock_mode ? 'mock' : 'bedrock');
+        let badgeHtml = '';
+        let cardTitle = '⚡ Supply Chain Plan';
+        let confirmBtnLabel = '✓ Confirm Plan';
+
+        if (mode === 'bedrock') {
+          updatePlannerModeDisplay('bedrock');
+          badgeHtml = '<span class="pill" style="font-size: 0.72rem; background: rgba(16, 185, 129, 0.15); color: #10B981; border: 1px solid rgba(16, 185, 129, 0.4);">Bedrock (live)</span>';
+          cardTitle = '⚡ Amazon Bedrock Plan';
+          confirmBtnLabel = '✓ Confirm Bedrock Plan';
+        } else if (mode === 'fallback') {
+          updatePlannerModeDisplay('fallback');
+          badgeHtml = '<span class="pill" style="font-size: 0.72rem; background: rgba(245, 158, 11, 0.15); color: #F59E0B; border: 1px solid rgba(245, 158, 11, 0.4);">Fallback</span>';
+          cardTitle = '⚡ Supply Chain Plan (Local Fallback)';
+          confirmBtnLabel = '✓ Confirm Plan';
+        } else {
+          // 'mock'
+          updatePlannerModeDisplay('mock');
+          badgeHtml = '<span class="pill" style="font-size: 0.72rem; background: rgba(139, 92, 246, 0.15); color: #A78BFA; border: 1px solid rgba(139, 92, 246, 0.4);">Mock mode</span>';
+          cardTitle = '⚡ Supply Chain Plan';
+          confirmBtnLabel = '✓ Confirm Plan';
+        }
+
         const steps = data.plan_steps.map((step, idx) => `
           <div class="step-item">
             <div class="step-dot">${idx + 1}</div>
@@ -1052,21 +1088,32 @@
           </div>
         `).join("");
 
+        const fallbackReason = data.fallback_reason || payload.fallback_reason;
+        const fallbackAlert = (mode === 'fallback' && fallbackReason) ? `
+          <div style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; font-size: 0.8rem; color: #FCD34D;">
+            ⚠️ <strong>Fallback Notice:</strong> Bedrock call failed (${escapeHtml(fallbackReason)}). Used local deterministic ERP planner.
+          </div>
+        ` : '';
+
         return `
           <div class="card-container" style="border-color: var(--border-active);">
             <div class="card-header">
               <div class="card-title">
-                ☁️ Amazon Bedrock Plan
-                <span class="pill pill-draft" style="font-size: 0.65rem;">${data.model_id || 'Nova'}</span>
+                ${cardTitle}
+                ${badgeHtml}
+                <span class="pill pill-draft" style="font-size: 0.65rem;">${escapeHtml(data.model_id || 'Nova')}</span>
               </div>
-              <span class="pill pill-draft">Draft ID: ${data.draft_id}</span>
+              <span class="pill pill-draft">Draft ID: ${escapeHtml(data.draft_id || 'None')}</span>
             </div>
+            ${fallbackAlert}
             <div class="step-timeline">${steps}</div>
             <div style="margin-top: 14px; display:flex; gap: 10px; align-items:center;">
-              <button class="btn-action-primary" onclick="confirmPurchaseOrder('${data.draft_id}')">
-                ✅ Confirm Bedrock Plan
-              </button>
-              <small style="color: var(--text-dim);">Voice confirmation active in session</small>
+              ${data.draft_id ? `
+                <button class="btn-action-primary" onclick="confirmPurchaseOrder('${escapeHtml(data.draft_id)}')">
+                  ${confirmBtnLabel}
+                </button>
+                <small style="color: var(--text-dim);">Voice confirmation active in session</small>
+              ` : ''}
             </div>
           </div>
         `;

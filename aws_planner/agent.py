@@ -1,10 +1,13 @@
 """Amazon Bedrock ERP Planner Agent using AWS Strands Agents SDK."""
 
 import json
+import logging
 from typing import Any, Dict, List, Optional
 from erp_core.models import Item, Supplier
 from erp_core.services import VoiceERPToolsService, VoiceSessionService
 from aws_planner.config import AWSConfig
+
+logger = logging.getLogger(__name__)
 
 
 class ERPPlannerAgent:
@@ -19,14 +22,14 @@ class ERPPlannerAgent:
         """Process natural language instructions, plan multi-step execution, and create a draft PO plan.
 
         Args:
-            prompt: User voice instruction (e.g. 'Restock everything that's running low from the fastest supplier').
+            prompt: User voice instruction (e.g. 'Restock everything that\'s running low from the fastest supplier').
             session_id: Conversational session identifier for confirmation state.
 
         Returns:
-            Dict containing speech-friendly text for Alexa and structured plan data.
+            Dict containing speech-friendly text for Alexa and structured plan data with transparent planner_mode.
         """
         if AWSConfig.is_mock_mode():
-            return cls._plan_and_execute_mock(prompt=prompt, session_id=session_id)
+            return cls._plan_and_execute_mock(prompt=prompt, session_id=session_id, planner_mode="mock")
         else:
             return cls._plan_and_execute_bedrock(prompt=prompt, session_id=session_id)
 
@@ -35,6 +38,8 @@ class ERPPlannerAgent:
         cls,
         prompt: str,
         session_id: str = "default",
+        planner_mode: str = "mock",
+        fallback_reason: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Deterministic multi-step planning simulation matching Bedrock execution trace."""
         cleaned_prompt = prompt.lower().strip()
@@ -47,22 +52,39 @@ class ERPPlannerAgent:
             f"Step 1: Queried warehouse inventory. Found {len(low_stock_items)} items currently at or below reorder levels."
         )
 
+        planner_title = (
+            "Amazon Bedrock ERP Planner (AWS Builder Challenge)"
+            if planner_mode == "bedrock"
+            else "ERP Supply Chain Planner"
+        )
+
         if not low_stock_items:
             speech = "All inventory items are currently well-stocked above reorder levels. No purchase orders are needed."
-            return {
-                "speech": speech,
-                "data": {
-                    "planner": "Amazon Bedrock ERP Planner (AWS Builder Challenge)",
-                    "framework": "AWS Strands Agents SDK",
-                    "model_id": AWSConfig.get_model_id(),
-                    "aws_region": AWSConfig.get_region(),
-                    "mock_mode": True,
-                    "prompt": prompt,
-                    "plan_steps": plan_steps,
-                    "draft_id": None,
-                    "status": "none_needed",
-                },
+            data_payload = {
+                "planner": planner_title,
+                "framework": "AWS Strands Agents SDK",
+                "model_id": AWSConfig.get_model_id(),
+                "aws_region": AWSConfig.get_region(),
+                "mock_mode": (planner_mode != "bedrock"),
+                "planner_mode": planner_mode,
+                "prompt": prompt,
+                "plan_steps": plan_steps,
+                "draft_id": None,
+                "status": "none_needed",
             }
+            if fallback_reason:
+                data_payload["fallback_reason"] = fallback_reason
+                data_payload["bedrock_error"] = fallback_reason
+                data_payload["note"] = f"Fell back to local deterministic planner due to Bedrock client exception: {fallback_reason}"
+
+            res = {
+                "speech": speech,
+                "planner_mode": planner_mode,
+                "data": data_payload,
+            }
+            if fallback_reason:
+                res["fallback_reason"] = fallback_reason
+            return res
 
         # Step 2: Evaluate criteria from prompt
         target_items = low_stock_items
@@ -136,37 +158,48 @@ class ERPPlannerAgent:
                 f"from {sup_str}. Total quantity is {total_qty}. Would you like me to confirm it?"
             )
 
-        return {
-            "speech": speech,
-            "data": {
-                "planner": "Amazon Bedrock ERP Planner (AWS Builder Challenge)",
-                "framework": "AWS Strands Agents SDK",
-                "model_id": AWSConfig.get_model_id(),
-                "aws_region": AWSConfig.get_region(),
-                "mock_mode": True,
-                "prompt": prompt,
-                "plan_steps": plan_steps,
-                "fastest_supplier": selected_supplier_info,
-                "draft_id": draft_id,
-                "status": "draft",
-                "requires_confirmation": True,
-                "po_count": len(po_ids),
-                "po_ids": po_ids,
-                "suppliers": supplier_names,
-                "items_count": len(target_items),
-                "total_quantity": total_qty,
-                "items": [
-                    {
-                        "sku": it.sku,
-                        "name": it.name,
-                        "stock_qty": it.stock_qty,
-                        "reorder_level": it.reorder_level,
-                        "supplier": it.supplier.name,
-                    }
-                    for it in target_items
-                ],
-            },
+        data_payload = {
+            "planner": planner_title,
+            "framework": "AWS Strands Agents SDK",
+            "model_id": AWSConfig.get_model_id(),
+            "aws_region": AWSConfig.get_region(),
+            "mock_mode": (planner_mode != "bedrock"),
+            "planner_mode": planner_mode,
+            "prompt": prompt,
+            "plan_steps": plan_steps,
+            "fastest_supplier": selected_supplier_info,
+            "draft_id": draft_id,
+            "status": "draft",
+            "requires_confirmation": True,
+            "po_count": len(po_ids),
+            "po_ids": po_ids,
+            "suppliers": supplier_names,
+            "items_count": len(target_items),
+            "total_quantity": total_qty,
+            "items": [
+                {
+                    "sku": it.sku,
+                    "name": it.name,
+                    "stock_qty": it.stock_qty,
+                    "reorder_level": it.reorder_level,
+                    "supplier": it.supplier.name,
+                }
+                for it in target_items
+            ],
         }
+        if fallback_reason:
+            data_payload["fallback_reason"] = fallback_reason
+            data_payload["bedrock_error"] = fallback_reason
+            data_payload["note"] = f"Fell back to local deterministic planner due to Bedrock client exception: {fallback_reason}"
+
+        res = {
+            "speech": speech,
+            "planner_mode": planner_mode,
+            "data": data_payload,
+        }
+        if fallback_reason:
+            res["fallback_reason"] = fallback_reason
+        return res
 
     @classmethod
     def _plan_and_execute_bedrock(
@@ -178,7 +211,7 @@ class ERPPlannerAgent:
         try:
             client = AWSConfig.get_bedrock_runtime_client()
             if client is None:
-                return cls._plan_and_execute_mock(prompt=prompt, session_id=session_id)
+                raise RuntimeError("Bedrock runtime client could not be initialized (client is None)")
 
             model_id = AWSConfig.get_model_id()
             system_prompt = (
@@ -199,15 +232,24 @@ class ERPPlannerAgent:
                 inferenceConfig={"temperature": 0.2, "maxTokens": 500},
             )
 
-            # Fall back to structured execution to generate actual PO records in DB
-            result = cls._plan_and_execute_mock(prompt=prompt, session_id=session_id)
-            result["data"]["mock_mode"] = False
+            # Structured execution to generate actual PO records in DB with planner_mode='bedrock'
+            result = cls._plan_and_execute_mock(
+                prompt=prompt,
+                session_id=session_id,
+                planner_mode="bedrock",
+            )
             result["data"]["bedrock_response_status"] = response.get("stopReason", "end_turn")
             return result
 
         except Exception as exc:
-            # Graceful fallback to local planner if AWS credentials are not active
-            mock_res = cls._plan_and_execute_mock(prompt=prompt, session_id=session_id)
-            mock_res["data"]["bedrock_error"] = str(exc)
-            mock_res["data"]["note"] = "Fell back to local deterministic planner due to Bedrock client exception."
-            return mock_res
+            error_reason = str(exc)
+            logger.warning(
+                "Amazon Bedrock planner call failed (%s). Falling back to local deterministic planner.",
+                error_reason,
+            )
+            return cls._plan_and_execute_mock(
+                prompt=prompt,
+                session_id=session_id,
+                planner_mode="fallback",
+                fallback_reason=error_reason,
+            )

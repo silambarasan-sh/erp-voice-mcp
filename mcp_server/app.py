@@ -44,15 +44,30 @@ from pathlib import Path
 from starlette.responses import HTMLResponse, JSONResponse
 from erp_core.services import VoiceERPToolsService, VoiceBriefingService
 from aws_planner.agent import ERPPlannerAgent
+from aws_planner.config import AWSConfig
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 CHAT_HTML_PATH = TEMPLATES_DIR / "chat.html"
 
 
 async def chat_page(request: Request) -> HTMLResponse:
-    """Serve the Alexa+ web chat simulator HTML page."""
+    """Serve the Alexa+ web chat simulator HTML page with mode-transparent labels."""
     if CHAT_HTML_PATH.exists():
         content = CHAT_HTML_PATH.read_text(encoding="utf-8")
+        is_live = not AWSConfig.is_mock_mode()
+        header_subtext = (
+            "Model Context Protocol &bull; Amazon Bedrock Planner"
+            if is_live
+            else "Model Context Protocol &bull; Supply Chain Planner"
+        )
+        restock_label = (
+            "⚡ Restock Fastest Supplier (Bedrock)"
+            if is_live
+            else "⚡ Restock Fastest Supplier"
+        )
+        content = content.replace("<!--HEADER_PLANNER_SUBTEXT-->", header_subtext)
+        content = content.replace("<!--RESTOCK_BUTTON_LABEL-->", restock_label)
+        content = content.replace("/*DEFAULT_IS_LIVE*/ false", f"/*DEFAULT_IS_LIVE*/ {'true' if is_live else 'false'}")
     else:
         content = "<h1>Alexa+ ERP Web Chat</h1><p>Template not found.</p>"
     return HTMLResponse(content)
@@ -123,13 +138,16 @@ async def chat_api(request: Request) -> JSONResponse:
             "data": briefing,
         }
 
-    return JSONResponse(
-        {
-            "tool": tool_name,
-            "speech": response_payload.get("speech", response_payload.get("voice_summary", "")),
-            "data": response_payload.get("data", response_payload),
-        }
-    )
+    res_body = {
+        "tool": tool_name,
+        "speech": response_payload.get("speech", response_payload.get("voice_summary", "")),
+        "data": response_payload.get("data", response_payload),
+    }
+    if "planner_mode" in response_payload:
+        res_body["planner_mode"] = response_payload["planner_mode"]
+    if "fallback_reason" in response_payload:
+        res_body["fallback_reason"] = response_payload["fallback_reason"]
+    return JSONResponse(res_body)
 
 
 async def tool_api(request: Request) -> JSONResponse:
@@ -191,13 +209,16 @@ async def tool_api(request: Request) -> JSONResponse:
     else:
         return JSONResponse({"error": f"Unknown tool: {tool_name}"}, status_code=400)
 
-    return JSONResponse(
-        {
-            "tool": tool_name,
-            "speech": result.get("speech", ""),
-            "data": result.get("data", result),
-        }
-    )
+    res_body = {
+        "tool": tool_name,
+        "speech": result.get("speech", ""),
+        "data": result.get("data", result),
+    }
+    if "planner_mode" in result:
+        res_body["planner_mode"] = result["planner_mode"]
+    if "fallback_reason" in result:
+        res_body["fallback_reason"] = result["fallback_reason"]
+    return JSONResponse(res_body)
 
 
 async def health_check(request: Request) -> JSONResponse:
@@ -225,6 +246,8 @@ async def health_check(request: Request) -> JSONResponse:
             "database_connected": db_ok,
             "voice_assistant_target": "Alexa+",
             "web_chat_demo": "/chat",
+            "aws_mock_mode": AWSConfig.is_mock_mode(),
+            "planner_mode": "mock" if AWSConfig.is_mock_mode() else "bedrock",
         }
     )
 

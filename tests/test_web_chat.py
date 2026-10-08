@@ -46,6 +46,8 @@ def test_chat_api_routing_replenishment(web_client):
     assert response.status_code == 200
     data = response.json()
     assert data["tool"] == "plan_erp_replenishment"
+    assert data["planner_mode"] == "mock"
+    assert data["data"]["planner_mode"] == "mock"
     assert "speech" in data
     assert "data" in data
     assert data["data"]["draft_id"] is not None
@@ -95,3 +97,26 @@ def test_tool_api_direct_call(web_client):
     data = response.json()
     assert data["tool"] == "get_low_stock_items"
     assert "items" in data["data"]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_chat_page_labels_honest_in_mock_mode(web_client):
+    """Verify header text and Restock button do not claim Bedrock when in default mock mode."""
+    import re
+    response = web_client.get("/chat")
+    assert response.status_code == 200
+    html = response.text
+
+    # Header subtext should be Supply Chain Planner, not Bedrock
+    header_match = re.search(r'<small id="header-planner-subtext"[^>]*>(.*?)</small>', html, re.DOTALL)
+    assert header_match is not None
+    header_text = header_match.group(1).strip()
+    assert "Supply Chain Planner" in header_text
+    assert "Bedrock" not in header_text
+
+    # Restock chip button should NOT say Bedrock
+    btn_match = re.search(r'<button class="chip-btn" id="chip-restock-btn"[^>]*>(.*?)</button>', html, re.DOTALL)
+    assert btn_match is not None
+    btn_text = btn_match.group(1).strip()
+    assert "Restock Fastest Supplier" in btn_text
+    assert "Bedrock" not in btn_text

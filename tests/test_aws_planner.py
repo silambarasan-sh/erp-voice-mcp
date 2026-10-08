@@ -33,6 +33,8 @@ def test_plan_fastest_supplier_replenishment():
 
     assert "speech" in result
     assert "data" in result
+    assert result["planner_mode"] == "mock"
+    assert result["data"]["planner_mode"] == "mock"
     data = result["data"]
 
     # Verify multi-step plan steps are documented
@@ -101,3 +103,109 @@ def test_planner_when_no_low_stock_needed():
     assert "well-stocked" in result["speech"].lower() or "no purchase orders are needed" in result["speech"].lower()
     assert result["data"]["status"] == "none_needed"
     assert result["data"]["draft_id"] is None
+
+
+@pytest.mark.django_db(transaction=True)
+def test_planner_mode_mock_default():
+    """Verify planner_mode is 'mock' when AWS_MOCK_MODE is true (default)."""
+    session_id = "test_planner_mock_mode"
+    prompt = "Restock low stock items"
+
+    result = ERPPlannerAgent.plan_and_execute(prompt=prompt, session_id=session_id)
+
+    assert result["planner_mode"] == "mock"
+    assert result["data"]["planner_mode"] == "mock"
+    assert result["data"]["mock_mode"] is True
+
+
+@pytest.mark.django_db(transaction=True)
+def test_planner_mode_bedrock_live_success(monkeypatch):
+    """Verify planner_mode is 'bedrock' when live Bedrock converse call succeeds."""
+    from unittest.mock import MagicMock
+
+    monkeypatch.setenv("AWS_MOCK_MODE", "false")
+
+    mock_client = MagicMock()
+    mock_client.converse.return_value = {
+        "stopReason": "end_turn",
+        "output": {
+            "message": {
+                "role": "assistant",
+                "content": [{"text": "Formulated replenishment plan using Bedrock."}],
+            }
+        },
+    }
+
+    monkeypatch.setattr(AWSConfig, "get_bedrock_runtime_client", lambda region_name=None: mock_client)
+
+    session_id = "test_bedrock_live_session"
+    prompt = "Restock everything running low from the fastest supplier"
+
+    result = ERPPlannerAgent.plan_and_execute(prompt=prompt, session_id=session_id)
+
+    assert result["planner_mode"] == "bedrock"
+    assert result["data"]["planner_mode"] == "bedrock"
+    assert result["data"]["mock_mode"] is False
+    assert result["data"]["bedrock_response_status"] == "end_turn"
+    assert mock_client.converse.called is True
+    assert "draft_id" in result["data"]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_planner_mode_fallback_on_bedrock_error(monkeypatch, caplog):
+    """Verify planner_mode is 'fallback', a WARNING is logged, and error reason is included when Bedrock fails."""
+    import logging
+    from unittest.mock import MagicMock
+
+    monkeypatch.setenv("AWS_MOCK_MODE", "false")
+
+    mock_client = MagicMock()
+    error_msg = "AccessDeniedException: User is not authorized to perform bedrock:Converse on resource"
+    mock_client.converse.side_effect = RuntimeError(error_msg)
+
+    monkeypatch.setattr(AWSConfig, "get_bedrock_runtime_client", lambda region_name=None: mock_client)
+
+    session_id = "test_bedrock_fallback_session"
+    prompt = "Restock everything running low from the fastest supplier"
+
+    with caplog.at_level(logging.WARNING):
+        result = ERPPlannerAgent.plan_and_execute(prompt=prompt, session_id=session_id)
+
+    # 1. Verify planner_mode is fallback
+    assert result["planner_mode"] == "fallback"
+    assert result["data"]["planner_mode"] == "fallback"
+    assert result["data"]["mock_mode"] is True
+
+    # 2. Verify error reason is present in both root and data
+    assert error_msg in result["fallback_reason"]
+    assert error_msg in result["data"]["fallback_reason"]
+    assert error_msg in result["data"]["bedrock_error"]
+
+    # 3. Verify clear WARNING log was emitted
+    warning_records = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warning_records) >= 1
+    assert any("Bedrock" in r.message and "AccessDeniedException" in r.message for r in warning_records)
+
+    # 4. Verify local planner still drafted orders safely
+    assert result["data"]["draft_id"] is not None
+    assert result["data"]["status"] == "draft"
+
+
+@pytest.mark.django_db(transaction=True)
+def test_planner_mode_fallback_on_client_init_none(monkeypatch, caplog):
+    """Verify fallback mode activates if get_bedrock_runtime_client returns None when live mode is requested."""
+    import logging
+
+    monkeypatch.setenv("AWS_MOCK_MODE", "false")
+    monkeypatch.setattr(AWSConfig, "get_bedrock_runtime_client", lambda region_name=None: None)
+
+    session_id = "test_bedrock_client_none_session"
+    prompt = "Restock low stock items"
+
+    with caplog.at_level(logging.WARNING):
+        result = ERPPlannerAgent.plan_and_execute(prompt=prompt, session_id=session_id)
+
+    assert result["planner_mode"] == "fallback"
+    assert result["data"]["planner_mode"] == "fallback"
+    assert "fallback_reason" in result
+    assert any(r.levelno == logging.WARNING for r in caplog.records)

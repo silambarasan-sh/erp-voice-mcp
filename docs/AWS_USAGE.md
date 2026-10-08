@@ -126,22 +126,59 @@ sequenceDiagram
 
 ---
 
-## 🧪 4. Zero-Cost Mock Mode (`AWS_MOCK_MODE`)
+## 🧪 4. Honest & Transparent Planner Modes (`AWS_MOCK_MODE`)
 
-To ensure that hackathon evaluators, CI/CD automated test suites, and local demos can run **without incurring AWS charges or requiring active AWS credentials**, the application includes a full **Mock Mode**:
+To ensure that hackathon evaluators, CI/CD automated test suites, and local demos can run **without incurring AWS charges or requiring active AWS credentials**, the application includes an honest and transparent multi-mode planner architecture.
+
+Every response from `plan_erp_replenishment` / `ERPPlannerAgent` includes an explicit **`planner_mode`** field:
+
+| Mode | Trigger Condition | Behavior & Guarantees |
+| :--- | :--- | :--- |
+| **`"bedrock"`** | `AWS_MOCK_MODE=False` and AWS Bedrock Converse API succeeds | Live foundation model call (`amazon.nova-micro-v1:0` or Claude 3.5 Sonnet) reasons over the inventory and formulates replenishment steps. |
+| **`"mock"`** | `AWS_MOCK_MODE=True` (Default) | Zero-cost deterministic multi-step simulation executing identical reasoning and tool chains without calling AWS APIs. |
+| **`"fallback"`** | `AWS_MOCK_MODE=False` but Bedrock API call fails (credentials, network, quota) | Emits a clear **`WARNING`** log with the exact exception reason, attaches `fallback_reason` to the response, and falls back gracefully to the deterministic local planner so ERP operations remain uninterrupted. |
+
+---
+
+### 🔍 Real vs. Mocked Breakdown in Default Mode
+
+In default mode (`AWS_MOCK_MODE=True`), here is exactly what is real versus what is simulated:
+
+| System Component | Execution Status | Implementation Details |
+| :--- | :---: | :--- |
+| **Amazon Bedrock Foundation Model** | **Mocked** | Simulated deterministic reasoning trace matching Bedrock execution without invoking AWS billable APIs. |
+| **ERP Inventory Database Query** | **100% REAL** | Real Django ORM query (`Item.objects.select_related("supplier").all()`) evaluating live SQLite stock levels against reorder thresholds. |
+| **Supplier Lead Time Evaluation** | **100% REAL** | Real calculation comparing supplier lead times (`supplier.lead_time_days`) from the live database. |
+| **Purchase Order Creation** | **100% REAL** | Writes actual draft Purchase Order and PO Line records to SQLite via `VoiceERPToolsService.draft_purchase_order()`. |
+| **Conversational Session Memory** | **100% REAL** | Real conversational staging in `VoiceSessionService` enabling subsequent spoken *"Confirm it"* queries. |
+| **Safety Enforcement (Ask-Then-Confirm)** | **100% REAL** | Drafts strictly remain in `'draft'` status until explicit user confirmation is received. |
+
+---
 
 ### Configuration in `.env`:
 ```ini
-# Set to True for zero-cost local demo & pytest suites
+# Set to True for zero-cost local demo & pytest suites (Default)
 AWS_MOCK_MODE=True
+
+# Set to False to route calls to live Amazon Bedrock
+# AWS_MOCK_MODE=False
 
 # AWS Region & Model configuration
 AWS_REGION=us-east-1
 BEDROCK_MODEL_ID=amazon.nova-micro-v1:0
 ```
 
-### Transition to Live AWS:
+### Transitioning to Live AWS:
 To run against real Amazon Bedrock:
 1. Set `AWS_MOCK_MODE=False` in `.env`.
-2. Configure AWS credentials via `aws configure` or set `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`.
-3. The server automatically routes requests to Bedrock's Converse API.
+2. Configure AWS credentials via `aws configure` or environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`).
+3. The server automatically routes requests to Bedrock's Converse API. If credentials are missing or invalid, the server logs a `WARNING` and sets `planner_mode: "fallback"`.
+
+---
+
+### 🎨 Web Chat UI Transparency Guarantee
+- **Badge Indicators**: The web chat UI displays a dedicated badge next to every plan result:
+  - `<span class="pill pill-confirmed">Bedrock (live)</span>` (Emerald) when live Bedrock succeeded.
+  - `<span class="pill pill-draft">Mock mode</span>` (Purple) when in default mock mode.
+  - `<span class="pill pill-overdue">Fallback</span>` (Amber) when live Bedrock failed and local planner was used (including an inline notice explaining the fallback reason).
+- **Labeling Rules**: Header subtext and Restock button labels **never display "Bedrock"** unless the active mode is verified live.

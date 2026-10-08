@@ -6,7 +6,7 @@
 [![MCP Spec](https://img.shields.io/badge/MCP%20Spec-2025--11--25-blue.svg)](https://modelcontextprotocol.io)
 [![Django](https://img.shields.io/badge/Django-5.2-green.svg)](https://www.djangoproject.com/)
 [![AWS Bedrock](https://img.shields.io/badge/AWS-Bedrock%20%2B%20Strands-orange.svg)](docs/AWS_USAGE.md)
-[![Tests](https://img.shields.io/badge/pytest-65%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/pytest-70%20passed-brightgreen.svg)]()
 [![Package](https://img.shields.io/badge/Package-django--erp--mcp-purple.svg)](django-erp-mcp/)
 
 ---
@@ -133,14 +133,31 @@ The server registers 11 primary tools over Model Context Protocol (MCP) supporti
 
 ---
 
-## ☁️ AWS Builder Layer: Amazon Bedrock & Strands Agents
+## ⚡ AWS Builder Layer: Amazon Bedrock & Strands Agents
 
 - **Amazon Bedrock Foundation Models**: Uses `amazon.nova-micro-v1:0` for fast voice inference or `anthropic.claude-3-5-sonnet-20241022-v2:0` for multi-step reasoning.
 - **AWS Strands Agents SDK**: Orchestrates tool definitions, multi-step goal decomposition, and confirmation enforcement.
-- **Zero-Cost Mock Mode**: Set `AWS_MOCK_MODE=True` in `.env` to execute deterministic local demos and test suites without cloud costs or AWS access keys.
 - **Full AWS Documentation**: See [docs/AWS_USAGE.md](docs/AWS_USAGE.md) for IAM least-privilege policies, container deployment, and architectural sequence flows.
 
----
+### 🔍 Honest & Transparent Planner Modes (`AWS_MOCK_MODE`)
+
+Every response from the planner includes a transparent **`planner_mode`** field:
+- **`"bedrock"`**: Live Amazon Bedrock Converse API invocation succeeded.
+- **`"mock"`**: Default zero-cost mode (`AWS_MOCK_MODE=True`) executing deterministic planning simulation without calling AWS APIs.
+- **`"fallback"`**: Bedrock was requested (`AWS_MOCK_MODE=False`) but failed. The server logs a clear **`WARNING`** with the error reason, attaches `fallback_reason` to the response, and uses the local planner so ERP operations never halt.
+
+#### What is Real vs. Mocked in Default Mode (`AWS_MOCK_MODE=True`):
+| Component | Status | Details |
+| :--- | :---: | :--- |
+| **Bedrock Foundation Model API** | **Mocked** | Simulated deterministic multi-step reasoning matching Bedrock execution trace. |
+| **Inventory Database Query** | **100% Real** | Live Django ORM queries (`Item.objects.all()`) against SQLite database. |
+| **Supplier Lead Time Analysis** | **100% Real** | Real calculation comparing supplier lead times from live database records. |
+| **Purchase Order Creation** | **100% Real** | Creates actual draft Purchase Order records in SQLite via `draft_purchase_order()`. |
+| **Session Memory & Confirmation** | **100% Real** | Staged in `VoiceSessionService` awaiting explicit spoken *"Confirm it"*. |
+
+#### Web Chat UI Transparency:
+- Results display small status badges: **`Bedrock (live)`** (emerald), **`Mock mode`** (purple), or **`Fallback`** (amber with failure reason).
+- Headers and the Restock quick button **never say "Bedrock"** unless the active mode is live.
 
 ## 🔌 Reusable Standalone Package: `django-erp-mcp`
 
@@ -181,10 +198,10 @@ All **65 tests** validate:
 - **MCP Protocol**: Streamable HTTP, header negotiation, health check, registered tools (6 tests)
 - **Voice Tools**: Invoices, overdue, low stock, leaves, sales summary (6 tests)
 - **Action Confirmation**: Draft-only creation, explicit confirmation, polite failure without draft, leave confirmation, session isolation (8 tests)
-- **AWS Bedrock Planner**: Environment config, fastest supplier optimization, multi-step plan generation, confirm-it flow (4 tests)
-- **Web Chat Simulator**: HTML page serving, browser root routing, voice API endpoints, direct tool execution (6 tests)
+- **AWS Bedrock Planner**: Environment config, fastest supplier optimization, multi-step plan generation, confirm-it flow, and all 3 planner modes (mock, bedrock live, fallback error handling) (8 tests)
+- **Web Chat Simulator**: HTML page serving, browser root routing, voice API endpoints, direct tool execution, transparent mode labels (7 tests)
 - **Standalone Package**: Model serialization, querying, tool registration, `@mcp_model` decorator (4 tests)
-- **Total**: **65 passed in ~18 seconds**.
+- **Total**: **70 passed in ~18 seconds**.
 
 ---
 
