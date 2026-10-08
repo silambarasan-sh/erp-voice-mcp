@@ -33,6 +33,7 @@ def test_registered_mcp_tools():
         "approve_leave",
         "reject_leave",
         "confirm_action",
+        "plan_erp_replenishment",
         "voice_daily_erp_briefing",
         "get_unpaid_invoices",
         "get_invoice",

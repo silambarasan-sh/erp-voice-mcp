@@ -5,7 +5,26 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![MCP Spec](https://img.shields.io/badge/MCP%20Spec-2025--11--25-blue.svg)](https://modelcontextprotocol.io)
 [![Django](https://img.shields.io/badge/Django-5.2-green.svg)](https://www.djangoproject.com/)
-[![Tests](https://img.shields.io/badge/pytest-51%20passed-brightgreen.svg)]()
+[![AWS Bedrock](https://img.shields.io/badge/AWS-Bedrock%20%2B%20Strands-orange.svg)](docs/AWS_USAGE.md)
+[![Tests](https://img.shields.io/badge/pytest-55%20passed-brightgreen.svg)]()
+
+---
+
+## ☁️ AWS Builder Layer: Amazon Bedrock & Strands Planner
+
+Built for the **AWS Builder Challenge**, this layer integrates **Amazon Bedrock Foundation Models** (`amazon.nova-micro-v1:0` / `anthropic.claude-3-5-sonnet-20241022-v2:0`) and the **AWS Strands Agents SDK** (`strands-agents`) to power autonomous multi-step supply chain planning:
+
+- **Tool**: `plan_erp_replenishment(prompt, session_id)`
+- **Natural Language Input**: E.g. *"Restock everything that's running low from the fastest supplier"*
+- **Multi-Step Execution**:
+  1. Inspects low-stock items across warehouse inventory.
+  2. Evaluates registered vendor lead times and optimizes for the fastest fulfillment window.
+  3. Formulates replenishment order quantities and groups by supplier.
+  4. Generates a **DRAFT** Purchase Order in SQLite and stages it in session state.
+  5. Returns a voice-ready plan for Alexa+ asking for confirmation (**never modifies data without user approval**).
+  6. The user can simply follow up with *"confirm it"* to approve the plan.
+- **Zero-Cost Mock Mode**: Set `AWS_MOCK_MODE=True` in `.env` to run all demos and automated tests offline without cloud costs.
+- **Detailed AWS Documentation**: Full architecture and service justifications are documented in [docs/AWS_USAGE.md](docs/AWS_USAGE.md).
 
 ---
 
@@ -22,6 +41,7 @@ The server exposes voice query tools, context follow-ups, and safe action tools 
 | `get_pending_leaves` | *None* | Spoken summary of pending employee leave requests with employee names and dates. |
 | `get_sales_summary` | `period` *(`today` \| `week` \| `month`)*, `session_id` | Spoken summary of sales, paid invoices, and revenue collected. |
 | `get_top_customers` | `session_id` | Context follow-up for *"and who are the top 3 customers for that?"* using conversational session memory. |
+| `plan_erp_replenishment` | `prompt`, `session_id` | Amazon Bedrock & Strands autonomous multi-step replenishment planner. |
 
 ### 2. Action Tools with Confirmation Step
 | Tool | Parameters | Ask-Then-Confirm Workflow |
@@ -203,7 +223,7 @@ Run the complete test suite with pytest:
 python -m pytest -v
 ```
 
-All **51 tests** validate:
+All **55 tests** validate:
 - Models: Customer, Supplier, Item, Invoice, PurchaseOrder, PurchaseOrderLine, Employee, LeaveRequest
 - Management command: `seed_demo_data` (counts, data integrity, idempotency)
 - Domain services: Invoices, Inventory, POs, HR Leave
@@ -211,6 +231,7 @@ All **51 tests** validate:
 - Action confirmation workflow: draft PO creation, explicit confirmation, polite failure without draft
 - Leave approval and rejection ask-then-confirm patterns
 - Conversational session state memory and follow-up tools (`get_top_customers`, `confirm_action`)
+- **Amazon Bedrock & Strands ERP Planner Agent**: multi-step inventory planning, fastest supplier optimization, draft creation, and confirmation
 - MCP protocol spec `2025-11-25` and Streamable HTTP endpoints
 
 ---

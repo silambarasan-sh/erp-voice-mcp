@@ -235,6 +235,32 @@ async def confirm_action(session_id: str = "default") -> Dict[str, Any]:
 
 
 # ============================================================================
+# AWS Builder Layer: Amazon Bedrock & Strands ERP Planner Agent
+# ============================================================================
+
+@mcp_server.tool()
+async def plan_erp_replenishment(
+    prompt: str,
+    session_id: str = "default",
+) -> Dict[str, Any]:
+    """Use Amazon Bedrock and Strands Agents SDK to plan multi-step ERP replenishment.
+
+    Processes natural language instructions such as 'Restock everything that's running low from the fastest supplier'.
+    Analyzes warehouse inventory, evaluates supplier lead times, drafts purchase orders in SQLite, and stages them for confirmation.
+
+    Args:
+        prompt: Natural language instruction (e.g. 'Restock everything running low from the fastest supplier').
+        session_id: Conversational session identifier for confirmation state.
+    """
+    from aws_planner.agent import ERPPlannerAgent
+
+    return await sync_to_async(ERPPlannerAgent.plan_and_execute)(
+        prompt=prompt,
+        session_id=session_id,
+    )
+
+
+# ============================================================================
 # Additional Domain & Executive Voice Tools
 # ============================================================================
 

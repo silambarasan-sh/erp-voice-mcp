@@ -5,6 +5,21 @@ All notable changes to the **ERP Voice Agent** project will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-10-08
+
+### Added
+- **AWS Layer for AWS Builder Challenge (Amazon Bedrock & Strands Agents SDK)**:
+  - Added `aws_planner` module integrating Amazon Bedrock Foundation Models (`amazon.nova-micro-v1:0` / `anthropic.claude-3-5-sonnet-20241022-v2:0`) and AWS Strands Agents SDK (`strands-agents`).
+  - Added `plan_erp_replenishment(prompt, session_id)` MCP tool that accepts natural language instructions (e.g. *"Restock everything that's running low from the fastest supplier"*).
+  - Multi-step planning engine: queries warehouse inventory, evaluates supplier lead times, calculates replenishment quantities, creates DRAFT purchase orders, and stages the plan in session state for confirmation.
+- **Zero-Cost Mock Mode (`AWS_MOCK_MODE`) & Secure Configuration**:
+  - Secure credential chain: reads `AWS_REGION` and `BEDROCK_MODEL_ID` from `.env`, never hardcoding credentials.
+  - Added `AWS_MOCK_MODE=True` environment flag to allow comprehensive testing and local demonstrations without requiring active AWS accounts or incurring cloud costs.
+- **AWS Usage Documentation (`docs/AWS_USAGE.md`)**:
+  - Exhaustive documentation detailing every AWS service utilized (Amazon Bedrock, AWS Strands Agents SDK, Amazon ECS/App Runner, AWS IAM), architectural diagrams, sequence flows, and justification.
+- **Dedicated Test Suite (`tests/test_aws_planner.py`)**:
+  - Validates environment configuration, fastest supplier selection, multi-step plan generation, draft PO creation, end-to-end *"confirm it"* workflow, and edge case handling.
+
 ## [1.3.0] - 2026-10-08
 
 ### Added
