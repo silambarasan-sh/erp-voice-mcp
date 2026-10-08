@@ -3,10 +3,11 @@
 > An enterprise Model Context Protocol (MCP) server that enables **Alexa+** and executive voice assistants to converse with a real-time ERP system (Invoices, Inventory, Purchase Orders, HR Leave) using natural spoken language, conversational session memory, an **Ask-Then-Confirm** action safety pattern, and autonomous **Amazon Bedrock** supply chain planning.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.12%20%7C%203.14.6%20tested-blue.svg)](https://www.python.org/)
 [![MCP Spec](https://img.shields.io/badge/MCP%20Spec-2025--11--25-blue.svg)](https://modelcontextprotocol.io)
 [![Django](https://img.shields.io/badge/Django-5.2-green.svg)](https://www.djangoproject.com/)
 [![AWS Bedrock](https://img.shields.io/badge/AWS-Bedrock%20%2B%20Strands-orange.svg)](docs/AWS_USAGE.md)
-[![Tests](https://img.shields.io/badge/pytest-70%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/pytest-82%20passed-brightgreen.svg)]()
 [![Package](https://img.shields.io/badge/Package-django--erp--mcp-purple.svg)](django-erp-mcp/)
 
 ---
@@ -65,26 +66,57 @@ flowchart TB
 
 ---
 
-## ⚡ Setup & Run (Under 5 Commands)
+## ⚡ Setup & Run
 
-Get up and running locally in **4 simple commands**:
+> **Tested Environment**: **Python 3.14.6** and **Python 3.12+** on Windows, macOS, and Linux.
+
+Follow these exact steps from a fresh clone:
+
+### 1. Create & Activate Virtual Environment
+
+**Windows (PowerShell):**
+```powershell
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+```
+
+**Linux / macOS / Bash:**
+```bash
+python -m venv venv
+source venv/bin/activate
+```
+
+### 2. Install Dependencies
 
 ```bash
-# 1. Install dependencies
 pip install -r requirements.txt
+```
 
-# 2. Configure environment
+### 3. Configure Environment File
+
+```powershell
+# Windows PowerShell:
+Copy-Item .env.example .env
+
+# Linux / macOS / Bash:
 cp .env.example .env
+```
 
-# 3. Apply migrations & seed realistic Indian demo data
-python manage.py migrate && python manage.py seed_demo_data
+### 4. Apply Migrations & Seed Realistic Demo Data
 
-# 4. Start the MCP Streamable HTTP server
+```bash
+python manage.py migrate
+python manage.py seed_demo_data
+```
+
+### 5. Start the MCP Server & Web Chat Simulator
+
+```bash
 python -m mcp_server.run
 ```
 
-The server is immediately available at:
-- **Web Chat Simulator**: [`http://127.0.0.1:8000/chat`](http://127.0.0.1:8000/chat) (or simply [`http://127.0.0.1:8000/`](http://127.0.0.1:8000/) in any browser)
+The server starts immediately and is accessible at:
+- **Web Chat Simulator**: [`http://127.0.0.1:8000/chat`](http://127.0.0.1:8000/chat) (or root [`http://127.0.0.1:8000/`](http://127.0.0.1:8000/) in any browser)
 - **MCP Streamable HTTP Endpoint**: `http://127.0.0.1:8000/mcp`
 - **Health Check & Spec Check**: `http://127.0.0.1:8000/health`
 
@@ -191,17 +223,17 @@ Run the complete test suite across all 13 test suites with pytest:
 python -m pytest -v
 ```
 
-All **65 tests** validate:
+All **82 tests** validate:
 - **Models**: Customer, Supplier, Item, Invoice, PurchaseOrder, PurchaseOrderLine, Employee, LeaveRequest (7 tests)
 - **Data Seeding**: Realistic Indian demo data counts & idempotency (2 tests)
 - **Domain Services**: Invoices, Inventory, POs, HR Leave, Daily Voice Briefing (17 tests)
 - **MCP Protocol**: Streamable HTTP, header negotiation, health check, registered tools (6 tests)
-- **Voice Tools**: Invoices, overdue, low stock, leaves, sales summary (6 tests)
+- **Voice Tools**: Invoices, overdue, low stock, leaves, sales summary, PO status (7 tests)
 - **Action Confirmation**: Draft-only creation, explicit confirmation, polite failure without draft, leave confirmation, session isolation (8 tests)
 - **AWS Bedrock Planner**: Environment config, fastest supplier optimization, multi-step plan generation, confirm-it flow, and all 3 planner modes (mock, bedrock live, fallback error handling) (8 tests)
-- **Web Chat Simulator**: HTML page serving, browser root routing, voice API endpoints, direct tool execution, transparent mode labels (7 tests)
+- **Web Chat Simulator**: HTML page serving, browser root routing, voice API endpoints, direct tool execution, transparent mode labels, explicit intent routing & fallback (18 tests)
 - **Standalone Package**: Model serialization, querying, tool registration, `@mcp_model` decorator (4 tests)
-- **Total**: **70 passed in ~18 seconds**.
+- **Total**: **82 passed in ~13 seconds**.
 
 ---
 

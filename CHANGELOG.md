@@ -5,6 +5,16 @@ All notable changes to the **ERP Voice Agent** project will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.0] - 2026-10-08
+
+### Fixed
+- **Requirements Dependency Resolution**:
+  - Resolved `pip install -r requirements.txt` backtracking conflict (`ResolutionImpossible`) between `httpx`, `mcp`, and `strands-agents`.
+  - Pinned `httpx>=0.28.1,<1.0.0` to satisfy `strands-agents` constraints.
+  - Aligned `mcp>=2.1.0` with `django-erp-mcp/pyproject.toml` and broadened `starlette>=0.40.0`.
+  - Verified clean virtual environment installation, database migrations, seeding, and all 82 pytest tests.
+  - Documented tested Python version (**3.14.6** and **3.12+**) and step-by-step setup workflow in `README.md`.
+
 ## [1.9.0] - 2026-10-08
 
 ### Changed
