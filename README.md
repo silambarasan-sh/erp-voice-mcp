@@ -1,306 +1,215 @@
 # ERP Voice Agent 🎙️🏢
 
-> **Hackathon Project**: An MCP server that enables **Alexa+** to interact with a sample ERP system (Invoices, Inventory, Purchase Orders, and HR Leave) via natural voice conversations.
+> An enterprise Model Context Protocol (MCP) server that enables **Alexa+** and executive voice assistants to converse with a real-time ERP system (Invoices, Inventory, Purchase Orders, HR Leave) using natural spoken language, conversational session memory, an **Ask-Then-Confirm** action safety pattern, and autonomous **Amazon Bedrock** supply chain planning.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![MCP Spec](https://img.shields.io/badge/MCP%20Spec-2025--11--25-blue.svg)](https://modelcontextprotocol.io)
 [![Django](https://img.shields.io/badge/Django-5.2-green.svg)](https://www.djangoproject.com/)
 [![AWS Bedrock](https://img.shields.io/badge/AWS-Bedrock%20%2B%20Strands-orange.svg)](docs/AWS_USAGE.md)
-[![Tests](https://img.shields.io/badge/pytest-61%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/pytest-65%20passed-brightgreen.svg)]()
+[![Package](https://img.shields.io/badge/Package-django--erp--mcp-purple.svg)](django-erp-mcp/)
 
 ---
 
-## ☁️ AWS Builder Layer: Amazon Bedrock & Strands Planner
+## 💡 What It Does
 
-Built for the **AWS Builder Challenge**, this layer integrates **Amazon Bedrock Foundation Models** (`amazon.nova-micro-v1:0` / `anthropic.claude-3-5-sonnet-20241022-v2:0`) and the **AWS Strands Agents SDK** (`strands-agents`) to power autonomous multi-step supply chain planning:
+1. **Voice-First ERP Queries**: Delivers concise, speech-friendly spoken answers formatted for text-to-speech engines (Alexa+), paired with rich structured data payloads for dashboards.
+2. **Conversational Session Memory**: Remembers context across turns—allowing natural executive follow-up questions such as *"and who are the top 3 customers for that?"* or *"confirm it"*.
+3. **Ask-Then-Confirm Safety Guarantee**: Never modifies mission-critical business data without explicit user confirmation. Drafts are safely staged in session memory until the user explicitly says *"Confirm it"*.
+4. **AWS Builder Layer (Amazon Bedrock & Strands Agents SDK)**: Autonomously reasons over complex executive instructions (e.g. *"Restock everything that's running low from the fastest supplier"*), evaluates vendor lead times, and formulates replenishment purchase orders.
+5. **Interactive Web Chat Simulator (`/chat`)**: Provides a fallback demo path featuring browser Web Speech API voice input, speech synthesis output, and interactive cards.
+6. **Reusable Standalone Adapter (`django-erp-mcp`)**: Extracted adapter package allowing **any Django application** to expose its models and actions as MCP tools with zero boilerplate.
 
-- **Tool**: `plan_erp_replenishment(prompt, session_id)`
-- **Natural Language Input**: E.g. *"Restock everything that's running low from the fastest supplier"*
-- **Multi-Step Execution**:
-  1. Inspects low-stock items across warehouse inventory.
-  2. Evaluates registered vendor lead times and optimizes for the fastest fulfillment window.
-  3. Formulates replenishment order quantities and groups by supplier.
-  4. Generates a **DRAFT** Purchase Order in SQLite and stages it in session state.
-  5. Returns a voice-ready plan for Alexa+ asking for confirmation (**never modifies data without user approval**).
-  6. The user can simply follow up with *"confirm it"* to approve the plan.
-- **Zero-Cost Mock Mode**: Set `AWS_MOCK_MODE=True` in `.env` to run all demos and automated tests offline without cloud costs.
-- **Detailed AWS Documentation**: Full architecture and service justifications are documented in [docs/AWS_USAGE.md](docs/AWS_USAGE.md).
+---
+
+## 🏛️ Architecture
+
+```mermaid
+flowchart TB
+    subgraph Clients ["Voice & Client Layer"]
+        Alexa["🎙️ Alexa+ / Voice Assistant"]
+        WebChat["💻 Web Chat Simulator (/chat)<br/>Web Speech API + TTS"]
+        Inspector["🔍 MCP Inspector"]
+    end
+
+    subgraph Transport ["MCP Transport Layer (Starlette ASGI)"]
+        StreamableHTTP["🌐 Streamable HTTP (/mcp)<br/>Protocol Spec: 2025-11-25"]
+        Middleware["🛡️ Protocol Version Middleware"]
+        RESTBridge["🔀 REST Bridge (/api/chat, /api/tool)"]
+    end
+
+    subgraph Intelligence ["Intelligence & Safety Layer"]
+        MCPServer["⚙️ MCP Server (Registered Voice Tools)"]
+        SessionMgr["🧠 VoiceSessionService<br/>Context Memory & Staged Actions"]
+        Bedrock["☁️ Amazon Bedrock (Nova / Claude)"]
+        Strands["🤖 AWS Strands Agents SDK Planner"]
+    end
+
+    subgraph ERP ["ERP Core & Persistence (Django 5)"]
+        Services["💼 Domain Services Layer<br/>Invoices, Inventory, POs, HR Leave"]
+        ORM["🗃️ Django ORM Models<br/>Customer, Supplier, Item, Invoice, PO, Leave"]
+        Database[("💾 SQLite Database<br/>Realistic Indian Demo Data")]
+    end
+
+    Clients --> StreamableHTTP
+    Clients --> RESTBridge
+    StreamableHTTP --> Middleware --> MCPServer
+    RESTBridge --> MCPServer
+    MCPServer --> SessionMgr
+    MCPServer --> Bedrock
+    Bedrock --> Strands
+    Strands --> Services
+    MCPServer --> Services
+    Services --> ORM --> Database
+```
+
+---
+
+## ⚡ Setup & Run (Under 5 Commands)
+
+Get up and running locally in **4 simple commands**:
+
+```bash
+# 1. Install dependencies
+pip install -r requirements.txt
+
+# 2. Configure environment
+cp .env.example .env
+
+# 3. Apply migrations & seed realistic Indian demo data
+python manage.py migrate && python manage.py seed_demo_data
+
+# 4. Start the MCP Streamable HTTP server
+python -m mcp_server.run
+```
+
+The server is immediately available at:
+- **Web Chat Simulator**: [`http://127.0.0.1:8000/chat`](http://127.0.0.1:8000/chat) (or simply [`http://127.0.0.1:8000/`](http://127.0.0.1:8000/) in any browser)
+- **MCP Streamable HTTP Endpoint**: `http://127.0.0.1:8000/mcp`
+- **Health Check & Spec Check**: `http://127.0.0.1:8000/health`
+
+---
+
+## 🎬 Hackathon Demo Script
+
+Use this step-by-step dialogue script to showcase the full range of voice features during demos:
+
+| Step | User Voice Query | Alexa+ Spoken Response | Visual Card Rendered |
+| :--- | :--- | :--- | :--- |
+| **1. Briefing** | *"Alexa, give me the daily ERP briefing"* | *"Namaste! You have 18 unpaid invoices totaling 31,15,000 rupees. 7 items are below reorder level. 8 leave requests are awaiting your review."* | Executive Summary Card with key business metrics. |
+| **2. Invoices** | *"What are my pending invoices for October?"* | *"You have 10 pending invoices totaling 18 lakh 75 thousand rupees. Top customers are Tata Motors, Infosys, and Reliance."* | Invoices Table Card with amounts in INR and status pills. |
+| **3. Context Follow-up** | *"and who are the top 3 customers for that?"* | *"For your pending invoices for October, the top 3 customers are Tata Motors (₹7,50,000), Infosys (₹6,20,000), and Reliance (₹5,05,000)."* | Top Customers Card utilizing session memory. |
+| **4. Inventory Alert** | *"Check low stock items"* | *"There are 7 items below reorder level, including Copper Wire 2.5mm and Steel Fasteners M8. Restocking is recommended."* | Low Stock Alert Card with supplier lead times. |
+| **5. Bedrock Planner** | *"Restock everything that's running low from the fastest supplier"* | *"I reviewed low stock items. Reliance Industrial Polymers is the fastest supplier with a 3-day lead time. I drafted order DRAFT-PO-11 for 3 items. Would you like me to confirm it?"* | Bedrock Plan Card showing multi-step execution trace. |
+| **6. Confirm Action** | *"Confirm it"* *(or click button)* | *"Purchase order DRAFT-PO-11 for Reliance Industrial Polymers has been confirmed."* | Card transitions badge to emerald **`CONFIRMED`**. |
+| **7. HR Leave Approval** | *"Review pending leave requests"* &rarr; *"Approve leave for Rajesh Sharma"* | *"Rajesh Sharma has requested leave from 2026-10-10 to 2026-10-12 for 'Personal work'. Should I confirm this approval?"* &rarr; *"Confirm it"* &rarr; *"Leave request confirmed and approved."* | Leave Card with inline **Approve** and **Reject** buttons. |
 
 ---
 
 ## 🎙️ Alexa+ Voice & Action MCP Tools
 
-The server exposes voice query tools, context follow-ups, and safe action tools featuring an **Ask-Then-Confirm pattern** (the system **never alters data without user confirmation**):
+The server registers 11 primary tools over Model Context Protocol (MCP) supporting specification version `2025-11-25`:
 
-### 1. Information Query & Context Follow-Up Tools
-| Tool | Parameters | Spoken Output / Function |
+### 1. Information Query & Context Tools
+| Tool | Arguments | Description |
 | :--- | :--- | :--- |
-| `get_pending_invoices` | `month` *(optional)*, `session_id` | Spoken summary with count, total pending INR amount, and top 3 customers. Stores context in session state. |
-| `get_overdue_invoices` | `session_id` | Spoken summary with count, overdue amount, and customers sorted by days overdue. |
-| `get_low_stock_items` | *None* | Spoken summary of inventory items below reorder level requiring supplier replenishment. |
-| `get_pending_leaves` | *None* | Spoken summary of pending employee leave requests with employee names and dates. |
-| `get_sales_summary` | `period` *(`today` \| `week` \| `month`)*, `session_id` | Spoken summary of sales, paid invoices, and revenue collected. |
-| `get_top_customers` | `session_id` | Context follow-up for *"and who are the top 3 customers for that?"* using conversational session memory. |
-| `plan_erp_replenishment` | `prompt`, `session_id` | Amazon Bedrock & Strands autonomous multi-step replenishment planner. |
+| `get_pending_invoices` | `month` *(optional)*, `session_id` | Count, total amount in INR, and top 3 customers. Stores context in session state. |
+| `get_overdue_invoices` | `session_id` | Overdue invoices with customer names, amounts, and days overdue. |
+| `get_low_stock_items` | *None* | Inventory items below reorder level with current stock and supplier lead times. |
+| `get_pending_leaves` | *None* | Pending employee leave requests with employee names, departments, and date ranges. |
+| `get_sales_summary` | `period` *(`today` \| `week` \| `month`)*, `session_id` | Revenue collected, paid invoice count, and average invoice size. |
+| `get_top_customers` | `session_id` | Follow-up query answering *"and who are the top 3 customers for that?"* using session state. |
+| `voice_daily_erp_briefing` | *None* | 30-second cross-domain morning executive briefing for Alexa+. |
 
 ### 2. Action Tools with Confirmation Step
-| Tool | Parameters | Ask-Then-Confirm Workflow |
+| Tool | Arguments | Ask-Then-Confirm Behavior |
 | :--- | :--- | :--- |
-| `draft_purchase_order` | `item_skus` *(optional)*, `session_id` | Auto-picks low stock items, groups by supplier, creates **DRAFT** POs in SQLite, and returns a summary + `draft_id`. Status remains `draft`. |
-| `confirm_purchase_order`| `draft_id` *(optional)*, `session_id` | Transitions draft PO status to **`confirmed`**. If `draft_id` is omitted, uses the active draft from session state. Fails politely if no draft exists. |
-| `approve_leave` | `employee_name`, `confirm` *(bool)*, `session_id` | When `confirm=False`, checks request and asks user for confirmation without altering database status. When `confirm=True`, marks status `approved`. |
+| `draft_purchase_order` | `item_skus` *(optional)*, `session_id` | Auto-picks low stock items, groups by vendor, creates **DRAFT** POs in SQLite, returns summary + `draft_id`. Status remains `draft`. |
+| `confirm_purchase_order`| `draft_id` *(optional)*, `session_id` | Transitions status to **`confirmed`**. If `draft_id` is omitted, uses the active draft from session. Fails politely if no draft exists. |
+| `approve_leave` | `employee_name`, `confirm` *(bool)*, `session_id` | When `confirm=False`, checks request and asks for confirmation without altering database status. When `confirm=True`, marks status `approved`. |
 | `reject_leave` | `employee_name`, `reason`, `confirm` *(bool)*, `session_id` | When `confirm=False`, asks for confirmation. When `confirm=True`, records reason and marks status `rejected`. |
-| `confirm_action` | `session_id` | Universal voice handler for conversational *"confirm it"* queries. Executes whichever staged action is pending in the session. |
-
-### Voice Response Structure:
-```json
-{
-  "speech": "You have 10 pending invoices totaling 18 lakh 75 thousand rupees. The top customers are Tata Motors, Infosys, and Reliance.",
-  "data": {
-    "count": 10,
-    "total_amount": 1875000.0,
-    "top_customers": [
-      {"customer": "Tata Motors", "pending_amount": 750000.0},
-      {"customer": "Infosys", "pending_amount": 620000.0},
-      {"customer": "Reliance", "pending_amount": 505000.0}
-    ]
-  }
-}
-```
+| `confirm_action` | `session_id` | Universal voice handler for conversational *"confirm it"* queries. |
+| `plan_erp_replenishment` | `prompt`, `session_id` | Amazon Bedrock & Strands autonomous multi-step replenishment planner. |
 
 ---
 
-## 📁 Repository Structure
+## ☁️ AWS Builder Layer: Amazon Bedrock & Strands Agents
 
-```text
-erp-voice-mcp/
-├── erp_core/                     # Unified Django project + app with models
-│   ├── management/
-│   │   └── commands/
-│   │       └── seed_demo_data.py # Realistic Indian demo data generator
-│   ├── migrations/               # Database migrations
-│   ├── admin.py                  # Django admin registrations
-│   ├── apps.py                   # Django app configuration
-│   ├── asgi.py                   # ASGI application
-│   ├── models.py                 # Core domain models
-│   ├── services.py               # Voice-friendly business logic layer
-│   ├── settings.py               # Django 5 project settings
-│   ├── urls.py                   # URL configuration
-│   └── wsgi.py                   # WSGI application
-├── mcp_server/                   # MCP Streamable HTTP server
-│   ├── __init__.py
-│   ├── app.py                    # Starlette ASGI app (/mcp, /health)
-│   ├── run.py                    # CLI server launcher
-│   └── server.py                 # Registered MCP tools
-├── tests/                        # Pytest test suite (37 tests)
-│   ├── conftest.py               # Pytest fixtures and test client
-│   ├── test_models.py            # Model unit tests
-│   ├── test_seed_command.py      # Demo seed verification
-│   ├── test_invoices.py          # Invoice service tests
-│   ├── test_inventory.py         # Inventory & low stock tests
-│   ├── test_purchase_orders.py   # Purchase orders & lines tests
-│   ├── test_hr_leave.py          # HR leave requests tests
-│   ├── test_voice_tools.py       # Voice briefing & async tool tests
-│   └── test_mcp_protocol.py      # MCP 2025-11-25 & Streamable HTTP tests
-├── .env.example                  # Environment template
-├── .env                          # Local configuration (no hardcoded secrets)
-├── .gitignore                    # Git ignore file
-├── CHANGELOG.md                  # Project version changelog
-├── LICENSE                       # MIT License
-├── manage.py                     # Django management entry point
-├── pytest.ini                    # Pytest configuration
-├── requirements.txt              # Project dependencies
-└── README.md                     # Documentation
-```
+- **Amazon Bedrock Foundation Models**: Uses `amazon.nova-micro-v1:0` for fast voice inference or `anthropic.claude-3-5-sonnet-20241022-v2:0` for multi-step reasoning.
+- **AWS Strands Agents SDK**: Orchestrates tool definitions, multi-step goal decomposition, and confirmation enforcement.
+- **Zero-Cost Mock Mode**: Set `AWS_MOCK_MODE=True` in `.env` to execute deterministic local demos and test suites without cloud costs or AWS access keys.
+- **Full AWS Documentation**: See [docs/AWS_USAGE.md](docs/AWS_USAGE.md) for IAM least-privilege policies, container deployment, and architectural sequence flows.
 
 ---
 
-## 🗃️ Data Models
+## 🔌 Reusable Standalone Package: `django-erp-mcp`
 
-The ERP Core application implements the following models:
+The reusable core of this project has been extracted into a standalone Python package located at [`django-erp-mcp/`](django-erp-mcp/):
 
-1. **`Customer`**:
-   - `name`: Company / client name
-   - `city`: Operating city (e.g., Bengaluru, Mumbai, Pune)
-2. **`Supplier`**:
-   - `name`: Vendor name
-   - `phone`: Contact phone number (e.g., `+91 98201 11223`)
-   - `lead_time_days`: Fulfillment lead time
-3. **`Item`**:
-   - `sku`: Unique inventory code (e.g., `SKU-IND-001`)
-   - `name`: Item description
-   - `stock_qty`: Current quantity on hand
-   - `reorder_level`: Reorder trigger threshold
-   - `supplier`: ForeignKey to `Supplier`
-   - `is_below_reorder_level`: Property indicating stock shortage
-4. **`Invoice`**:
-   - `customer`: ForeignKey to `Customer`
-   - `invoice_no`: Unique identifier (e.g., `INV-2026-101`)
-   - `amount`: Invoice total in INR (Decimal)
-   - `status`: `paid`, `pending`, or `overdue`
-   - `due_date`: Payment due date
-   - `created_at`: Creation timestamp
-5. **`PurchaseOrder`**:
-   - `supplier`: ForeignKey to `Supplier`
-   - `status`: `draft` or `confirmed`
-   - `created_at`: Creation timestamp
-6. **`PurchaseOrderLine`**:
-   - `po`: ForeignKey to `PurchaseOrder`
-   - `item`: ForeignKey to `Item`
-   - `qty`: Quantity ordered
-7. **`Employee`**:
-   - `name`: Full employee name
-   - `department`: Department (Engineering, Operations, Finance, etc.)
-8. **`LeaveRequest`**:
-   - `employee`: ForeignKey to `Employee`
-   - `from_date`: Start date
-   - `to_date`: End date
-   - `status`: `pending`, `approved`, or `rejected`
-   - `reason`: Leave explanation
+- **What it is**: An adapter allowing any Django app to expose its models and actions as MCP tools with speech summaries and confirmation guards.
+- **Includes**: Its own `pyproject.toml`, MIT `LICENSE`, `README.md`, `example/`, and unit test suite.
+- **Quick Example**:
+  ```python
+  from mcp.server.mcpserver import MCPServer
+  from django_erp_mcp import DjangoMCPRegistry
+  from myapp.models import Invoice
 
----
-
-## 🌐 MCP Protocol & Streamable HTTP Compliance
-
-- **MCP Specification Version**: **`2025-11-25`**
-- **Transport**: **Streamable HTTP** mounted at `/mcp`
-- **SDK**: Official Anthropic `mcp` Python SDK (v2.3.0)
-- **Header Support**: Negotiates and returns `MCP-Protocol-Version: 2025-11-25`
-
----
-
-## 🚀 Setup & Execution
-
-### 1. Install Dependencies
-```bash
-pip install -r requirements.txt
-```
-
-### 2. Configure Environment
-```bash
-cp .env.example .env
-```
-*(On Windows PowerShell: `Copy-Item .env.example .env`)*
-
-### 3. Apply Migrations & Seed Demo Data
-```bash
-python manage.py makemigrations erp_core
-python manage.py migrate
-python manage.py seed_demo_data
-```
-
-The `seed_demo_data` command generates:
-- **5 Indian Suppliers** (e.g., Reliance Industrial Polymers, Tata Advanced Components)
-- **10 Indian Customers** across major metropolitan hubs (Bengaluru, Mumbai, Pune, Chennai, Delhi)
-- **25 Items** (with multiple critical items below reorder levels)
-- **30 Invoices** distributed across `paid`, `pending`, and `overdue`
-- **15 Employees** across 5 business departments
-- **8 Pending Leave Requests** ready for manager sign-off
-
----
-
-## 🏃 Running the MCP Server
-
-Start the MCP Streamable HTTP server:
-```bash
-python -m mcp_server.run
-```
-Or with Uvicorn:
-```bash
-uvicorn mcp_server.app:app --host 127.0.0.1 --port 8000
-```
-
-- **MCP Endpoint**: `http://127.0.0.1:8000/mcp`
-- **Web Chat Simulator**: `http://127.0.0.1:8000/chat` (or `http://127.0.0.1:8000/` in browser)
-- **Health Check**: `http://127.0.0.1:8000/health`
-
----
-
-## 🎙️ Alexa+ Web Chat Simulator (Fallback Demo)
-
-A visual and voice-interactive web client is served directly by the application at **`http://127.0.0.1:8000/chat`**:
-- **Microphone / Voice Input**: Uses the browser **Web Speech API** (`webkitSpeechRecognition`) with pulsing voice detection animations.
-- **Voice Output (TTS)**: Reads Alexa responses aloud using the browser **`speechSynthesis`** API with mute and replay controls.
-- **Rich Cards**:
-  - **Invoice Table Card**: Filtered views with Indian Rupee formatting and status tags.
-  - **Low-Stock List Card**: Stock level visual meters with supplier fulfillment lead times.
-  - **Purchase Order Draft Card**: Displays generated draft orders with an interactive **Confirm Purchase Order** button.
-  - **Pending Leaves Card**: Employee requests with inline **Approve** and **Reject** buttons.
-  - **Amazon Bedrock Plan Card**: Visualizes multi-step planning execution traces.
-- **REST & Tool Bridge**: Supports both conversational routing (`/api/chat`) and direct tool execution (`/api/tool`).
+  mcp_server = MCPServer("my-django-mcp")
+  registry = DjangoMCPRegistry(mcp_server)
+  registry.register_model(
+      model=Invoice,
+      read_fields=["invoice_no", "amount", "status"],
+      search_fields=["invoice_no", "customer__name"],
+      voice_formatter=lambda invs: f"Found {len(invs)} invoices totaling ₹{sum(i.amount for i in invs):,.2f}.",
+  )
+  ```
 
 ---
 
 ## 🧪 Running Tests
 
-Run the complete test suite with pytest:
+Run the complete test suite across all 13 test suites with pytest:
+
 ```bash
 python -m pytest -v
 ```
 
-All **61 tests** validate:
-- Models: Customer, Supplier, Item, Invoice, PurchaseOrder, PurchaseOrderLine, Employee, LeaveRequest
-- Management command: `seed_demo_data` (counts, data integrity, idempotency)
-- Domain services: Invoices, Inventory, POs, HR Leave
-- 5 Voice-optimized MCP tools (`get_pending_invoices`, `get_overdue_invoices`, `get_low_stock_items`, `get_pending_leaves`, `get_sales_summary`)
-- Action confirmation workflow: draft PO creation, explicit confirmation, polite failure without draft
-- Leave approval and rejection ask-then-confirm patterns
-- Conversational session state memory and follow-up tools (`get_top_customers`, `confirm_action`)
-- **Amazon Bedrock & Strands ERP Planner Agent**: multi-step inventory planning, fastest supplier optimization, draft creation, and confirmation
-- **Alexa+ Web Chat Simulator**: HTML page serving, browser root routing, voice API endpoints, and direct tool execution
-- MCP protocol spec `2025-11-25` and Streamable HTTP endpoints
+All **65 tests** validate:
+- **Models**: Customer, Supplier, Item, Invoice, PurchaseOrder, PurchaseOrderLine, Employee, LeaveRequest (7 tests)
+- **Data Seeding**: Realistic Indian demo data counts & idempotency (2 tests)
+- **Domain Services**: Invoices, Inventory, POs, HR Leave, Daily Voice Briefing (17 tests)
+- **MCP Protocol**: Streamable HTTP, header negotiation, health check, registered tools (6 tests)
+- **Voice Tools**: Invoices, overdue, low stock, leaves, sales summary (6 tests)
+- **Action Confirmation**: Draft-only creation, explicit confirmation, polite failure without draft, leave confirmation, session isolation (8 tests)
+- **AWS Bedrock Planner**: Environment config, fastest supplier optimization, multi-step plan generation, confirm-it flow (4 tests)
+- **Web Chat Simulator**: HTML page serving, browser root routing, voice API endpoints, direct tool execution (6 tests)
+- **Standalone Package**: Model serialization, querying, tool registration, `@mcp_model` decorator (4 tests)
+- **Total**: **65 passed in ~18 seconds**.
 
 ---
 
-## 🔍 Testing with MCP Inspector
+## 🔍 Testing with the MCP Inspector
 
-You can inspect, interact, and test all 5 voice tools using the official **MCP Inspector**:
+Test tool calls interactively with the official [MCP Inspector](https://github.com/modelcontextprotocol/inspector):
 
-### Step 1: Start the ERP MCP Server
-In your project terminal:
 ```bash
+# Terminal 1: Start the MCP Server
 python -m mcp_server.run
-```
-*(The server will be running on `http://127.0.0.1:8000/mcp`)*
 
-### Step 2: Launch the MCP Inspector
-In a separate terminal, launch the Inspector with npx:
-```bash
-npx @modelcontextprotocol/inspector
-```
-Or connect directly to your Streamable HTTP endpoint:
-```bash
+# Terminal 2: Connect MCP Inspector to Streamable HTTP
 npx @modelcontextprotocol/inspector http://127.0.0.1:8000/mcp
 ```
 
-### Step 3: Connect and Test
-1. In the Inspector UI, set **Transport Type** to `Streamable HTTP` (or `SSE / HTTP`).
-2. Set the URL to: `http://127.0.0.1:8000/mcp`.
-3. Click **Connect**.
-4. Navigate to the **Tools** tab:
-   - You will see all 5 voice tools listed with their full descriptions.
-   - Click `get_pending_invoices` and execute with or without `month`.
-   - Click `get_overdue_invoices` and review the overdue list.
-   - Click `get_low_stock_items` to view shortage alerts.
-   - Click `get_pending_leaves` to see pending leaves.
-   - Click `get_sales_summary` with `period: "month"` to check sales performance.
-5. Verify both the `speech` string (for Alexa+) and the `data` payload.
+1. Select **Streamable HTTP** as the transport type.
+2. Verify all registered tools appear under the **Tools** tab.
+3. Test tool executions and inspect both `speech` and `data` outputs.
 
 ---
 
-## 📡 Verification Commands
+## 📚 Documentation Links
 
-### 1. Check Health & Protocol Spec Version:
-```bash
-curl -i http://127.0.0.1:8000/health
-```
-
-### 2. Streamable HTTP Header Negotiation:
-```bash
-curl -i -H "MCP-Protocol-Version: 2025-11-25" http://127.0.0.1:8000/mcp
-```
-
----
-
-## 📄 License
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+- [docs/AWS_USAGE.md](docs/AWS_USAGE.md): Complete AWS cloud services documentation, architecture, and Bedrock justifications.
+- [docs/FRICTION_LOG.md](docs/FRICTION_LOG.md): Developer friction log, framework limitations, workarounds, and upstream suggestions.
+- [django-erp-mcp/README.md](django-erp-mcp/README.md): Standalone package documentation and quickstart guide.
+- [CHANGELOG.md](CHANGELOG.md): Version history adhering to Keep a Changelog.
+- [LICENSE](LICENSE): MIT License.

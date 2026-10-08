@@ -5,6 +5,22 @@ All notable changes to the **ERP Voice Agent** project will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-10-08
+
+### Added
+- **Standalone Package `django-erp-mcp`**:
+  - Extracted core reusable Django-to-MCP model adapter into `django-erp-mcp/`.
+  - Includes `pyproject.toml` with MIT License, dependencies, and build config.
+  - `@mcp_model` decorator and `DjangoMCPRegistry` for declarative tool exposure.
+  - Automatic query (`query_<model>`) and fetch (`get_<model>`) MCP tool generation.
+  - Complete standalone package test suite (`django-erp-mcp/tests/test_adapter.py`) and standalone example (`django-erp-mcp/example/`).
+  - Standalone package `README.md` with quickstart, API documentation, and architecture.
+- **Developer Friction Log (`docs/FRICTION_LOG.md`)**:
+  - Standardized friction log template (`task`, `steps`, `expected vs actual`, `severity`, `workaround`, `suggestion`).
+  - Cataloged 5 engineering friction entries covering MCP protocol header negotiation, SQLite concurrency under async Starlette, Web Speech API nuances, Bedrock test costs, and Django model introspection.
+- **Finalized Documentation & Under 5 Commands Run Workflow**:
+  - Main `README.md` updated with system architecture (Mermaid flowchart), under 5 commands setup and run guide, step-by-step hackathon demo script, and complete testing instructions.
+
 ## [1.5.0] - 2026-10-08
 
 ### Added
