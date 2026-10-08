@@ -4,7 +4,7 @@ Provides domain services with natural voice summaries tailored for Alexa+ voice 
 operating on Customer, Supplier, Item, Invoice, PurchaseOrder, and LeaveRequest models.
 """
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 from django.db import transaction
@@ -443,3 +443,260 @@ class VoiceBriefingService:
             "pending_leave_requests_count": pending_leave,
             "voice_summary": voice_summary,
         }
+
+
+class VoiceERPToolsService:
+    """Service implementing the 5 core Alexa+ ERP voice tools with speech-friendly responses."""
+
+    MONTH_MAP = {
+        "january": 1, "jan": 1, "1": 1, "01": 1,
+        "february": 2, "feb": 2, "2": 2, "02": 2,
+        "march": 3, "mar": 3, "3": 3, "03": 3,
+        "april": 4, "apr": 4, "4": 4, "04": 4,
+        "may": 5, "5": 5, "05": 5,
+        "june": 6, "jun": 6, "6": 6, "06": 6,
+        "july": 7, "jul": 7, "7": 7, "07": 7,
+        "august": 8, "aug": 8, "8": 8, "08": 8,
+        "september": 9, "sep": 9, "sept": 9, "9": 9, "09": 9,
+        "october": 10, "oct": 10, "10": 10,
+        "november": 11, "nov": 11, "11": 11,
+        "december": 12, "dec": 12, "12": 12,
+    }
+
+    @classmethod
+    def get_pending_invoices(cls, month: Optional[str] = None) -> Dict[str, Any]:
+        """Return pending invoices with count, total amount, and top 3 customers.
+
+        Optionally filtered by month name or number.
+        """
+        qs = Invoice.objects.filter(status="pending").select_related("customer")
+        month_label = ""
+
+        if month:
+            cleaned = month.strip().lower()
+            month_num = None
+            if "-" in cleaned:
+                # e.g. "2026-10"
+                parts = cleaned.split("-")
+                try:
+                    month_num = int(parts[1])
+                    qs = qs.filter(due_date__year=int(parts[0]), due_date__month=month_num)
+                    month_label = f" for {cleaned}"
+                except (ValueError, IndexError):
+                    pass
+            elif cleaned in cls.MONTH_MAP:
+                month_num = cls.MONTH_MAP[cleaned]
+                qs = qs.filter(due_date__month=month_num)
+                month_label = f" for {month.capitalize()}"
+
+        invoices = list(qs)
+        count = len(invoices)
+        total_amount = sum((inv.amount for inv in invoices), Decimal("0.00"))
+
+        # Calculate top 3 customers by amount
+        cust_totals: Dict[str, Decimal] = {}
+        for inv in invoices:
+            name = inv.customer.name
+            cust_totals[name] = cust_totals.get(name, Decimal("0.00")) + inv.amount
+
+        sorted_customers = sorted(cust_totals.items(), key=lambda x: x[1], reverse=True)[:3]
+        top_3 = [{"customer": name, "amount": float(amt)} for name, amt in sorted_customers]
+
+        if count == 0:
+            speech = f"You have no pending invoices{month_label}."
+        else:
+            names_str = ", ".join(name for name, _ in sorted_customers)
+            speech = (
+                f"You have {count} pending invoices{month_label} totaling {total_amount:,.2f} rupees. "
+                f"Top customers are {names_str}."
+            )
+
+        return {
+            "speech": speech,
+            "data": {
+                "count": count,
+                "total_amount": float(total_amount),
+                "month_filter": month,
+                "top_3_customers": top_3,
+                "invoices": [inv.to_dict() for inv in invoices],
+            },
+        }
+
+    @staticmethod
+    def get_overdue_invoices() -> Dict[str, Any]:
+        """Return overdue invoices with customer name and number of days overdue."""
+        today = timezone.now().date()
+        qs = Invoice.objects.filter(status="overdue").select_related("customer").order_by("due_date")
+        invoices = list(qs)
+        count = len(invoices)
+
+        overdue_list = []
+        total_amount = Decimal("0.00")
+        for inv in invoices:
+            days = max(0, (today - inv.due_date).days)
+            total_amount += inv.amount
+            overdue_list.append({
+                "invoice_no": inv.invoice_no,
+                "customer": inv.customer.name,
+                "amount": float(inv.amount),
+                "due_date": inv.due_date.isoformat(),
+                "days_overdue": days,
+            })
+
+        # Sort by days_overdue descending
+        overdue_list.sort(key=lambda x: x["days_overdue"], reverse=True)
+
+        if count == 0:
+            speech = "Great news, there are no overdue invoices."
+        else:
+            top_overdue = overdue_list[0]
+            speech = (
+                f"You have {count} overdue invoices totaling {total_amount:,.2f} rupees. "
+                f"The most overdue is {top_overdue['invoice_no']} for {top_overdue['customer']}, "
+                f"{top_overdue['days_overdue']} days overdue."
+            )
+
+        return {
+            "speech": speech,
+            "data": {
+                "count": count,
+                "total_amount": float(total_amount),
+                "invoices": overdue_list,
+            },
+        }
+
+    @staticmethod
+    def get_low_stock_items() -> Dict[str, Any]:
+        """Return inventory items currently below reorder level requiring restocking."""
+        all_items = Item.objects.select_related("supplier").all()
+        low_items = [i for i in all_items if i.is_below_reorder_level]
+        # Sort by most depleted relative to reorder level
+        low_items.sort(key=lambda x: x.stock_qty)
+        count = len(low_items)
+
+        items_data = [
+            {
+                "sku": i.sku,
+                "name": i.name,
+                "stock_qty": i.stock_qty,
+                "reorder_level": i.reorder_level,
+                "supplier": i.supplier.name,
+                "lead_time_days": i.supplier.lead_time_days,
+            }
+            for i in low_items
+        ]
+
+        if count == 0:
+            speech = "All inventory items are currently well-stocked above reorder levels."
+        else:
+            sample_names = ", ".join(i.name for i in low_items[:2])
+            speech = (
+                f"There are {count} items below reorder level, including {sample_names}. "
+                "Restocking is recommended."
+            )
+
+        return {
+            "speech": speech,
+            "data": {
+                "count": count,
+                "items": items_data,
+            },
+        }
+
+    @staticmethod
+    def get_pending_leaves() -> Dict[str, Any]:
+        """Return employee leave requests pending manager review with dates and departments."""
+        requests = list(LeaveRequest.objects.filter(status="pending").select_related("employee").order_by("from_date"))
+        count = len(requests)
+
+        leaves_data = [
+            {
+                "id": r.id,
+                "employee": r.employee.name,
+                "department": r.employee.department,
+                "from_date": r.from_date.isoformat(),
+                "to_date": r.to_date.isoformat(),
+                "reason": r.reason,
+            }
+            for r in requests
+        ]
+
+        if count == 0:
+            speech = "There are no pending employee leave requests."
+        elif count == 1:
+            req = leaves_data[0]
+            speech = (
+                f"There is 1 pending leave request from {req['employee']} in {req['department']} "
+                f"from {req['from_date']} to {req['to_date']}."
+            )
+        else:
+            first_two = [f"{r['employee']} from {r['from_date']}" for r in leaves_data[:2]]
+            names_summary = ", and ".join(first_two)
+            speech = (
+                f"You have {count} pending leave requests, including {names_summary}."
+            )
+
+        return {
+            "speech": speech,
+            "data": {
+                "count": count,
+                "pending_leaves": leaves_data,
+            },
+        }
+
+    @staticmethod
+    def get_sales_summary(period: str = "month") -> Dict[str, Any]:
+        """Return total sales revenue and invoice counts for today, this week, or this month."""
+        cleaned = period.strip().lower()
+        today = timezone.now().date()
+
+        if cleaned == "today":
+            start_date = today
+            period_label = "today"
+        elif cleaned == "week":
+            start_date = today - timedelta(days=7)
+            period_label = "this week"
+        else:  # default to month
+            start_date = today - timedelta(days=30)
+            period_label = "this month"
+            cleaned = "month"
+
+        # Filter invoices created in or applicable to the period
+        qs = Invoice.objects.filter(created_at__date__gte=start_date)
+        invoices = list(qs)
+
+        total_invoiced = sum((inv.amount for inv in invoices), Decimal("0.00"))
+        total_count = len(invoices)
+
+        paid_invoices = [inv for inv in invoices if inv.status == "paid"]
+        paid_amount = sum((inv.amount for inv in paid_invoices), Decimal("0.00"))
+        paid_count = len(paid_invoices)
+
+        pending_invoices = [inv for inv in invoices if inv.status == "pending"]
+        pending_amount = sum((inv.amount for inv in pending_invoices), Decimal("0.00"))
+
+        overdue_invoices = [inv for inv in invoices if inv.status == "overdue"]
+        overdue_amount = sum((inv.amount for inv in overdue_invoices), Decimal("0.00"))
+
+        speech = (
+            f"Sales summary for {period_label}: {total_count} invoices created totaling {total_invoiced:,.2f} rupees, "
+            f"with {paid_amount:,.2f} rupees collected from {paid_count} paid invoices."
+        )
+
+        return {
+            "speech": speech,
+            "data": {
+                "period": cleaned,
+                "period_label": period_label,
+                "start_date": start_date.isoformat(),
+                "total_invoices_count": total_count,
+                "total_invoiced_amount": float(total_invoiced),
+                "paid_invoices_count": paid_count,
+                "paid_amount": float(paid_amount),
+                "pending_invoices_count": len(pending_invoices),
+                "pending_amount": float(pending_amount),
+                "overdue_invoices_count": len(overdue_invoices),
+                "overdue_amount": float(overdue_amount),
+            },
+        }
+

@@ -6,7 +6,7 @@ from mcp_server.server import (
     voice_daily_erp_briefing,
     get_unpaid_invoices,
     check_inventory_stock,
-    get_low_stock_alerts,
+    get_low_stock_items,
     list_purchase_orders,
     list_pending_leave_requests,
     get_employee_leave_summary,
@@ -45,8 +45,8 @@ async def test_async_mcp_domain_tools():
     stock_res = await check_inventory_stock(query="Busbar")
     assert stock_res["count"] == 1
 
-    alerts_res = await get_low_stock_alerts()
-    assert alerts_res["count"] >= 5
+    alerts_res = await get_low_stock_items()
+    assert alerts_res["data"]["count"] >= 5
 
     po_res = await list_purchase_orders(status="draft")
     assert po_res["count"] >= 1

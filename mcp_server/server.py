@@ -1,8 +1,14 @@
-"""MCP Server implementing tools for the ERP Voice Agent.
+"""MCP Server implementing voice-optimized tools for the ERP Voice Agent.
 
-Exposes tools for Invoices, Inventory, Purchase Orders, and HR Leave.
-Integrates with Django 5 SQLite backend using official MCP Python SDK.
-Designed specifically for voice assistants like Alexa+.
+Exposes tools for Alexa+ to interact with the sample ERP:
+1. get_pending_invoices(month: optional) -> count + total amount + top 3 customers
+2. get_overdue_invoices() -> list with customer and days overdue
+3. get_low_stock_items() -> items below reorder level
+4. get_pending_leaves() -> employees and dates
+5. get_sales_summary(period: today|week|month)
+
+All responses return a short speech-friendly string for Alexa plus a structured data field.
+Implements MCP spec version 2025-11-25 over Streamable HTTP.
 """
 
 import os
@@ -16,6 +22,7 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "erp_core.settings")
 django.setup()
 
 from erp_core.services import (
+    VoiceERPToolsService,
     InvoiceService,
     InventoryService,
     PurchaseOrderService,
@@ -31,7 +38,62 @@ mcp_server = MCPServer(SERVER_NAME)
 
 
 # ============================================================================
-# Executive Voice Tools
+# Core Alexa+ Voice Tools
+# ============================================================================
+
+@mcp_server.tool()
+async def get_pending_invoices(month: Optional[str] = None) -> Dict[str, Any]:
+    """Retrieve pending customer invoices with total count, total amount in rupees, and top 3 customers.
+
+    Alexa reads the short speech summary aloud. Optionally filter by month name (e.g. 'October', 'November') or number (e.g. '10', '2026-10').
+
+    Args:
+        month: Optional month filter (e.g. 'October', '10', or '2026-10'). If omitted, returns all pending invoices.
+    """
+    return await sync_to_async(VoiceERPToolsService.get_pending_invoices)(month=month)
+
+
+@mcp_server.tool()
+async def get_overdue_invoices() -> Dict[str, Any]:
+    """Retrieve all overdue customer invoices with customer names, amounts, and number of days overdue.
+
+    Alexa reads the short speech summary aloud. Returns a list sorted by days overdue.
+    """
+    return await sync_to_async(VoiceERPToolsService.get_overdue_invoices)()
+
+
+@mcp_server.tool()
+async def get_low_stock_items() -> Dict[str, Any]:
+    """Retrieve all inventory items currently at or below their reorder level that require supplier replenishment.
+
+    Alexa reads the short speech summary aloud. Returns SKU, item name, current stock, reorder level, and supplier lead time.
+    """
+    return await sync_to_async(VoiceERPToolsService.get_low_stock_items)()
+
+
+@mcp_server.tool()
+async def get_pending_leaves() -> Dict[str, Any]:
+    """Retrieve all employee leave requests currently pending manager review, including employee names, departments, and dates.
+
+    Alexa reads the short speech summary aloud. Returns employee details, leave duration, and reasons.
+    """
+    return await sync_to_async(VoiceERPToolsService.get_pending_leaves)()
+
+
+@mcp_server.tool()
+async def get_sales_summary(period: str = "month") -> Dict[str, Any]:
+    """Retrieve sales and invoice revenue summaries for today, this week, or this month.
+
+    Alexa reads the short speech summary aloud.
+
+    Args:
+        period: Time window to summarize. Allowed values: 'today', 'week', or 'month'. Defaults to 'month'.
+    """
+    return await sync_to_async(VoiceERPToolsService.get_sales_summary)(period=period)
+
+
+# ============================================================================
+# Additional Domain & Executive Voice Tools
 # ============================================================================
 
 @mcp_server.tool()
@@ -43,10 +105,6 @@ async def voice_daily_erp_briefing() -> Dict[str, Any]:
     """
     return await sync_to_async(VoiceBriefingService.get_daily_briefing)()
 
-
-# ============================================================================
-# Invoices Tools
-# ============================================================================
 
 @mcp_server.tool()
 async def get_unpaid_invoices(customer_name: Optional[str] = None) -> Dict[str, Any]:
@@ -104,10 +162,6 @@ async def pay_invoice(invoice_no: str) -> Dict[str, Any]:
     return await sync_to_async(InvoiceService.mark_invoice_paid)(invoice_no=invoice_no)
 
 
-# ============================================================================
-# Inventory Tools
-# ============================================================================
-
 @mcp_server.tool()
 async def check_inventory_stock(query: Optional[str] = None) -> Dict[str, Any]:
     """Check warehouse stock levels by item name or SKU.
@@ -116,12 +170,6 @@ async def check_inventory_stock(query: Optional[str] = None) -> Dict[str, Any]:
         query: Optional search term matching item name or SKU (e.g. 'Busbar' or 'SKU-IND-001').
     """
     return await sync_to_async(InventoryService.check_stock)(query=query)
-
-
-@mcp_server.tool()
-async def get_low_stock_alerts() -> Dict[str, Any]:
-    """Get all inventory items currently at or below their reorder level."""
-    return await sync_to_async(InventoryService.get_low_stock_items)()
 
 
 @mcp_server.tool()
@@ -140,10 +188,6 @@ async def adjust_inventory_stock(
         quantity_delta=quantity_delta,
     )
 
-
-# ============================================================================
-# Purchase Order Tools
-# ============================================================================
 
 @mcp_server.tool()
 async def list_purchase_orders(status: Optional[str] = None) -> Dict[str, Any]:
@@ -181,10 +225,6 @@ async def confirm_purchase_order(po_id: int) -> Dict[str, Any]:
     """
     return await sync_to_async(PurchaseOrderService.confirm_purchase_order)(po_id=po_id)
 
-
-# ============================================================================
-# HR Leave Tools
-# ============================================================================
 
 @mcp_server.tool()
 async def get_employee_leave_summary(employee_query: str) -> Dict[str, Any]:

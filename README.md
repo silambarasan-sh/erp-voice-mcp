@@ -5,7 +5,37 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![MCP Spec](https://img.shields.io/badge/MCP%20Spec-2025--11--25-blue.svg)](https://modelcontextprotocol.io)
 [![Django](https://img.shields.io/badge/Django-5.2-green.svg)](https://www.djangoproject.com/)
-[![Tests](https://img.shields.io/badge/pytest-37%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/pytest-43%20passed-brightgreen.svg)]()
+
+---
+
+## 🎙️ Alexa+ Voice MCP Tools
+
+The server registers 5 primary voice tools on the official Python MCP SDK over Streamable HTTP. Each tool returns a **concise, speech-friendly summary** formatted for voice synthesis (Alexa+), along with a **structured data** object:
+
+| Tool | Parameters | Description / Return |
+| :--- | :--- | :--- |
+| `get_pending_invoices` | `month` *(optional, int 1-12)* | Spoken summary with count, total pending INR amount, and top 3 pending customers. |
+| `get_overdue_invoices` | *None* | Spoken summary with count, total overdue amount, and list of customers with days overdue. |
+| `get_low_stock_items` | *None* | Spoken summary of inventory items below reorder level, including item name, current stock, and threshold. |
+| `get_pending_leaves` | *None* | Spoken summary of pending employee leave requests with employee names, departments, and date ranges. |
+| `get_sales_summary` | `period` *(`today` \| `week` \| `month`, default: `month`)* | Spoken summary of paid invoices, total revenue in INR, and average transaction size for the period. |
+
+### Voice Response Structure:
+```json
+{
+  "speech": "You have 10 pending invoices totaling 18 lakh 75 thousand rupees. The top customers are Tata Motors, Infosys, and Reliance.",
+  "data": {
+    "count": 10,
+    "total_amount": 1875000.0,
+    "top_customers": [
+      {"customer": "Tata Motors", "pending_amount": 750000.0},
+      {"customer": "Infosys", "pending_amount": 620000.0},
+      {"customer": "Reliance", "pending_amount": 505000.0}
+    ]
+  }
+}
+```
 
 ---
 
@@ -162,12 +192,49 @@ Run the complete test suite with pytest:
 python -m pytest -v
 ```
 
-All **37 tests** validate:
+All **43 tests** validate:
 - Models: Customer, Supplier, Item, Invoice, PurchaseOrder, PurchaseOrderLine, Employee, LeaveRequest
 - Management command: `seed_demo_data` (counts, data integrity, idempotency)
 - Domain services: Invoices, Inventory, POs, HR Leave
-- Executive Voice Briefing for Alexa+
+- 5 Voice-optimized MCP tools (`get_pending_invoices`, `get_overdue_invoices`, `get_low_stock_items`, `get_pending_leaves`, `get_sales_summary`)
+- Speech + structured data response contract
 - MCP protocol spec `2025-11-25` and Streamable HTTP endpoints
+
+---
+
+## 🔍 Testing with MCP Inspector
+
+You can inspect, interact, and test all 5 voice tools using the official **MCP Inspector**:
+
+### Step 1: Start the ERP MCP Server
+In your project terminal:
+```bash
+python -m mcp_server.run
+```
+*(The server will be running on `http://127.0.0.1:8000/mcp`)*
+
+### Step 2: Launch the MCP Inspector
+In a separate terminal, launch the Inspector with npx:
+```bash
+npx @modelcontextprotocol/inspector
+```
+Or connect directly to your Streamable HTTP endpoint:
+```bash
+npx @modelcontextprotocol/inspector http://127.0.0.1:8000/mcp
+```
+
+### Step 3: Connect and Test
+1. In the Inspector UI, set **Transport Type** to `Streamable HTTP` (or `SSE / HTTP`).
+2. Set the URL to: `http://127.0.0.1:8000/mcp`.
+3. Click **Connect**.
+4. Navigate to the **Tools** tab:
+   - You will see all 5 voice tools listed with their full descriptions.
+   - Click `get_pending_invoices` and execute with or without `month`.
+   - Click `get_overdue_invoices` and review the overdue list.
+   - Click `get_low_stock_items` to view shortage alerts.
+   - Click `get_pending_leaves` to see pending leaves.
+   - Click `get_sales_summary` with `period: "month"` to check sales performance.
+5. Verify both the `speech` string (for Alexa+) and the `data` payload.
 
 ---
 

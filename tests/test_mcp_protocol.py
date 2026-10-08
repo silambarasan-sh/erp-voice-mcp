@@ -22,13 +22,17 @@ def test_registered_mcp_tools():
     tool_names = [tool.name for tool in mcp_server._tool_manager.list_tools()]
 
     expected_tools = [
+        "get_pending_invoices",
+        "get_overdue_invoices",
+        "get_low_stock_items",
+        "get_pending_leaves",
+        "get_sales_summary",
         "voice_daily_erp_briefing",
         "get_unpaid_invoices",
         "get_invoice",
         "create_invoice",
         "pay_invoice",
         "check_inventory_stock",
-        "get_low_stock_alerts",
         "adjust_inventory_stock",
         "list_purchase_orders",
         "create_purchase_order",

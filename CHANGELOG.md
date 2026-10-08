@@ -5,6 +5,22 @@ All notable changes to the **ERP Voice Agent** project will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-10-08
+
+### Added
+- **5 Voice-Optimized MCP Tools for Alexa+**:
+  - `get_pending_invoices(month: optional)`: Returns pending invoice count, total pending amount (INR), and top 3 pending customers.
+  - `get_overdue_invoices()`: Returns list of overdue invoices with customer names, days overdue, and amounts.
+  - `get_low_stock_items()`: Returns items below reorder level with current quantities, thresholds, and suppliers.
+  - `get_pending_leaves()`: Returns pending employee leave requests with employee names, dates, and reasons.
+  - `get_sales_summary(period: today|week|month)`: Returns total sales revenue, paid invoice counts, and period breakdown.
+- **Speech-Friendly Response Contract**:
+  - Every tool returns a concise, conversational `speech` field formatted for text-to-speech engines (Alexa+), paired with an exhaustive `data` field for display/structured processing.
+- **Dedicated Pytest Suite (`tests/test_voice_mcp_tools.py`)**:
+  - Tests calling all 5 tools covering default arguments, optional month filtering, periods (today, week, month), and data structures.
+- **MCP Inspector Integration**:
+  - Full instructions for running and testing against Streamable HTTP using `@modelcontextprotocol/inspector`.
+
 ## [1.1.0] - 2026-10-08
 
 ### Added
