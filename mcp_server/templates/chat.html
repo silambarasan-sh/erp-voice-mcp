@@ -1,0 +1,1220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Alexa+ ERP Voice Assistant</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-base: #070B14;
+      --bg-surface: #0E1626;
+      --bg-card: rgba(18, 28, 48, 0.75);
+      --bg-card-hover: rgba(25, 38, 64, 0.9);
+      --border-subtle: rgba(255, 255, 255, 0.08);
+      --border-active: rgba(0, 202, 255, 0.4);
+      --alexa-cyan: #00CAFF;
+      --alexa-blue: #0073BB;
+      --accent-indigo: #6366F1;
+      --text-main: #F3F4F6;
+      --text-muted: #94A3B8;
+      --text-dim: #64748B;
+      --status-paid: #10B981;
+      --status-pending: #F59E0B;
+      --status-overdue: #EF4444;
+      --status-draft: #8B5CF6;
+      --status-confirmed: #10B981;
+      --shadow-glow: 0 0 35px rgba(0, 202, 255, 0.25);
+      --shadow-card: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
+      --radius-sm: 8px;
+      --radius-md: 14px;
+      --radius-lg: 22px;
+      --font-display: 'Outfit', sans-serif;
+      --font-body: 'Plus Jakarta Sans', sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-base);
+      background-image: 
+        radial-gradient(circle at 15% 15%, rgba(0, 202, 255, 0.08) 0%, transparent 45%),
+        radial-gradient(circle at 85% 85%, rgba(99, 102, 241, 0.08) 0%, transparent 45%);
+      color: var(--text-main);
+      font-family: var(--font-body);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow-x: hidden;
+    }
+
+    /* Header Bar */
+    header {
+      background: rgba(14, 22, 38, 0.85);
+      backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--border-subtle);
+      padding: 14px 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .alexa-orb {
+      width: 38px;
+      height: 38px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 35% 35%, #00CAFF, #0073BB 60%, #070B14 100%);
+      box-shadow: 0 0 18px rgba(0, 202, 255, 0.6);
+      position: relative;
+      animation: orbPulse 3s ease-in-out infinite;
+    }
+
+    @keyframes orbPulse {
+      0%, 100% { transform: scale(1); box-shadow: 0 0 16px rgba(0, 202, 255, 0.5); }
+      50% { transform: scale(1.06); box-shadow: 0 0 26px rgba(0, 202, 255, 0.85); }
+    }
+
+    .brand-title {
+      font-family: var(--font-display);
+      font-size: 1.25rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .brand-badge {
+      background: linear-gradient(135deg, rgba(0, 202, 255, 0.2), rgba(99, 102, 241, 0.2));
+      border: 1px solid var(--border-active);
+      color: var(--alexa-cyan);
+      font-size: 0.72rem;
+      font-weight: 600;
+      padding: 3px 8px;
+      border-radius: 20px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .icon-btn {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-muted);
+      border-radius: var(--radius-sm);
+      padding: 8px 12px;
+      font-size: 0.85rem;
+      font-family: var(--font-body);
+      font-weight: 500;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s ease;
+    }
+
+    .icon-btn:hover {
+      border-color: var(--alexa-cyan);
+      color: var(--text-main);
+      box-shadow: 0 0 12px rgba(0, 202, 255, 0.2);
+    }
+
+    .icon-btn.active {
+      background: rgba(0, 202, 255, 0.15);
+      border-color: var(--alexa-cyan);
+      color: var(--alexa-cyan);
+    }
+
+    /* Main Container */
+    main {
+      flex: 1;
+      max-width: 1040px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 24px 20px 140px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    /* Suggestion Chips */
+    .chips-carousel {
+      display: flex;
+      gap: 10px;
+      overflow-x: auto;
+      padding-bottom: 6px;
+      scrollbar-width: none;
+    }
+    .chips-carousel::-webkit-scrollbar { display: none; }
+
+    .chip-btn {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-muted);
+      padding: 7px 14px;
+      border-radius: 30px;
+      font-size: 0.82rem;
+      font-family: var(--font-body);
+      white-space: nowrap;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s ease;
+    }
+
+    .chip-btn:hover {
+      background: rgba(0, 202, 255, 0.1);
+      border-color: var(--alexa-cyan);
+      color: var(--text-main);
+      transform: translateY(-1px);
+    }
+
+    /* Conversation Feed */
+    #conversation-view {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .message-row {
+      display: flex;
+      gap: 14px;
+      animation: fadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .message-row.user {
+      justify-content: flex-end;
+    }
+
+    .avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.9rem;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+
+    .avatar.alexa {
+      background: radial-gradient(circle at 35% 35%, #00CAFF, #0073BB);
+      box-shadow: 0 0 12px rgba(0, 202, 255, 0.5);
+      color: #070B14;
+    }
+
+    .avatar.user {
+      background: linear-gradient(135deg, #6366F1, #8B5CF6);
+      color: #FFF;
+    }
+
+    .message-body {
+      max-width: 82%;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .speech-bubble {
+      padding: 14px 18px;
+      border-radius: var(--radius-md);
+      font-size: 0.95rem;
+      line-height: 1.55;
+      position: relative;
+    }
+
+    .message-row.user .speech-bubble {
+      background: linear-gradient(135deg, #4F46E5, #6366F1);
+      color: #FFF;
+      border-bottom-right-radius: 4px;
+      align-self: flex-end;
+    }
+
+    .message-row.alexa .speech-bubble {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-main);
+      border-bottom-left-radius: 4px;
+    }
+
+    .speech-controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 6px;
+    }
+
+    .replay-btn {
+      background: transparent;
+      border: none;
+      color: var(--alexa-cyan);
+      font-size: 0.75rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-family: var(--font-body);
+      opacity: 0.8;
+      transition: opacity 0.2s ease;
+    }
+
+    .replay-btn:hover { opacity: 1; }
+
+    /* Structured Cards */
+    .card-container {
+      background: var(--bg-card);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 16px 20px;
+      box-shadow: var(--shadow-card);
+      overflow-x: auto;
+    }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .card-title {
+      font-family: var(--font-display);
+      font-size: 0.95rem;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .pill {
+      font-size: 0.72rem;
+      font-weight: 600;
+      padding: 3px 9px;
+      border-radius: 20px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .pill-paid { background: rgba(16, 185, 129, 0.15); color: var(--status-paid); border: 1px solid rgba(16, 185, 129, 0.3); }
+    .pill-pending { background: rgba(245, 158, 11, 0.15); color: var(--status-pending); border: 1px solid rgba(245, 158, 11, 0.3); }
+    .pill-overdue { background: rgba(239, 68, 68, 0.15); color: var(--status-overdue); border: 1px solid rgba(239, 68, 68, 0.3); }
+    .pill-draft { background: rgba(139, 92, 246, 0.15); color: var(--status-draft); border: 1px solid rgba(139, 92, 246, 0.3); }
+    .pill-confirmed { background: rgba(16, 185, 129, 0.15); color: var(--status-confirmed); border: 1px solid rgba(16, 185, 129, 0.3); }
+
+    /* Tables */
+    table.data-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.84rem;
+      text-align: left;
+    }
+
+    table.data-table th {
+      color: var(--text-dim);
+      font-weight: 600;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    table.data-table td {
+      padding: 10px 10px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      color: var(--text-main);
+    }
+
+    table.data-table tr:hover td {
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    /* Action Buttons in Cards */
+    .btn-action-primary {
+      background: linear-gradient(135deg, #00CAFF, #0073BB);
+      border: none;
+      color: #070B14;
+      font-family: var(--font-display);
+      font-weight: 700;
+      font-size: 0.85rem;
+      padding: 8px 16px;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s ease;
+      box-shadow: 0 4px 14px rgba(0, 202, 255, 0.3);
+    }
+
+    .btn-action-primary:hover {
+      box-shadow: 0 6px 20px rgba(0, 202, 255, 0.5);
+      transform: translateY(-1px);
+    }
+
+    .btn-action-secondary {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-main);
+      font-family: var(--font-body);
+      font-weight: 600;
+      font-size: 0.8rem;
+      padding: 6px 12px;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .btn-action-secondary:hover {
+      border-color: var(--text-main);
+    }
+
+    /* Step Timeline */
+    .step-timeline {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin: 10px 0;
+    }
+
+    .step-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      font-size: 0.82rem;
+      color: var(--text-muted);
+    }
+
+    .step-dot {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: rgba(0, 202, 255, 0.2);
+      border: 1px solid var(--alexa-cyan);
+      color: var(--alexa-cyan);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.65rem;
+      font-weight: 700;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+
+    /* Fixed Floating Voice & Text Controller */
+    .voice-controller {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: rgba(7, 11, 20, 0.88);
+      backdrop-filter: blur(20px);
+      border-top: 1px solid var(--border-subtle);
+      padding: 16px 20px 24px;
+      z-index: 40;
+    }
+
+    .controller-inner {
+      max-width: 860px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .mic-button-wrapper {
+      position: relative;
+    }
+
+    .mic-glow-ring {
+      position: absolute;
+      top: -6px;
+      left: -6px;
+      right: -6px;
+      bottom: -6px;
+      border-radius: 50%;
+      border: 2px solid var(--alexa-cyan);
+      opacity: 0;
+      transform: scale(0.9);
+      pointer-events: none;
+      transition: all 0.3s ease;
+    }
+
+    .mic-button {
+      width: 52px;
+      height: 52px;
+      border-radius: 50%;
+      border: none;
+      background: radial-gradient(circle at 35% 35%, #00CAFF, #0073BB);
+      color: #070B14;
+      font-size: 1.3rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      box-shadow: 0 4px 18px rgba(0, 202, 255, 0.4);
+      transition: all 0.25s ease;
+      flex-shrink: 0;
+    }
+
+    .mic-button:hover {
+      transform: scale(1.05);
+      box-shadow: 0 6px 26px rgba(0, 202, 255, 0.7);
+    }
+
+    .mic-button.is-listening {
+      background: radial-gradient(circle at 35% 35%, #EF4444, #B91C1C);
+      color: #FFF;
+      box-shadow: 0 0 30px rgba(239, 68, 68, 0.8);
+      animation: listeningPulse 1.2s infinite;
+    }
+
+    @keyframes listeningPulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.12); }
+    }
+
+    .mic-button.is-listening + .mic-glow-ring {
+      opacity: 1;
+      border-color: #EF4444;
+      animation: ringExpand 1.5s infinite;
+    }
+
+    @keyframes ringExpand {
+      0% { transform: scale(1); opacity: 0.8; }
+      100% { transform: scale(1.4); opacity: 0; }
+    }
+
+    .input-box-wrapper {
+      flex: 1;
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+
+    .chat-input {
+      width: 100%;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: 30px;
+      padding: 14px 50px 14px 20px;
+      color: var(--text-main);
+      font-family: var(--font-body);
+      font-size: 0.95rem;
+      outline: none;
+      transition: all 0.2s ease;
+    }
+
+    .chat-input:focus {
+      border-color: var(--alexa-cyan);
+      box-shadow: 0 0 15px rgba(0, 202, 255, 0.2);
+    }
+
+    .send-btn {
+      position: absolute;
+      right: 8px;
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      border: none;
+      background: var(--alexa-cyan);
+      color: #070B14;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s ease;
+    }
+
+    .send-btn:hover {
+      background: #FFF;
+      transform: scale(1.05);
+    }
+
+    /* Speaking Waves indicator */
+    .speaking-indicator {
+      display: none;
+      align-items: center;
+      gap: 3px;
+      height: 16px;
+      margin-left: 6px;
+    }
+
+    .speaking-indicator.active {
+      display: inline-flex;
+    }
+
+    .wave-bar {
+      width: 3px;
+      height: 100%;
+      background: var(--alexa-cyan);
+      border-radius: 2px;
+      animation: wave 0.8s ease-in-out infinite alternate;
+    }
+    .wave-bar:nth-child(2) { animation-delay: 0.2s; }
+    .wave-bar:nth-child(3) { animation-delay: 0.4s; }
+
+    @keyframes wave {
+      from { height: 4px; }
+      to { height: 16px; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Header -->
+  <header>
+    <div class="brand">
+      <div class="alexa-orb" id="alexa-orb-header"></div>
+      <div>
+        <div class="brand-title">
+          Alexa+ ERP Agent
+          <span class="brand-badge">MCP Live</span>
+        </div>
+        <small style="color: var(--text-dim); font-size: 0.72rem;">Model Context Protocol &bull; Amazon Bedrock Planner</small>
+      </div>
+    </div>
+
+    <div class="header-actions">
+      <button class="icon-btn active" id="tts-toggle-btn" title="Toggle Alexa Speech Output">
+        🔊 <span id="tts-status-text">Voice: ON</span>
+      </button>
+      <button class="icon-btn" id="clear-chat-btn" title="Clear conversation">
+        🗑️ Clear
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Chat Feed -->
+  <main>
+    <!-- Quick Prompts Carousel -->
+    <div class="chips-carousel">
+      <button class="chip-btn" data-prompt="What are my pending invoices?">
+        📄 Pending Invoices
+      </button>
+      <button class="chip-btn" data-prompt="and who are the top 3 customers for that?">
+        👥 Top 3 Customers
+      </button>
+      <button class="chip-btn" data-prompt="Check low stock items">
+        ⚠️ Low Stock Alert
+      </button>
+      <button class="chip-btn" data-prompt="Restock everything that's running low from the fastest supplier">
+        ⚡ Restock Fastest Supplier (Bedrock)
+      </button>
+      <button class="chip-btn" data-prompt="Review pending leave requests">
+        📅 Pending Leaves
+      </button>
+      <button class="chip-btn" data-prompt="Confirm it">
+        ✅ Confirm It
+      </button>
+    </div>
+
+    <!-- Conversation View -->
+    <div id="conversation-view">
+      <!-- Welcome Message from Alexa -->
+      <div class="message-row alexa">
+        <div class="avatar alexa">🎙️</div>
+        <div class="message-body">
+          <div class="speech-bubble">
+            <strong>Namaste!</strong> I am your <strong>Alexa+ ERP Voice Agent</strong>. You can speak or type to check pending invoices, inventory levels, approve leaves, or ask Bedrock to plan supply chain restocking. How can I help you today?
+          </div>
+          <div class="speech-controls">
+            <button class="replay-btn" onclick="speakText(this.parentElement.previousElementSibling.innerText)">
+              🔊 Speak again
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Bottom Voice & Input Controller -->
+  <div class="voice-controller">
+    <div class="controller-inner">
+      <div class="mic-button-wrapper">
+        <button class="mic-button" id="voice-mic-btn" title="Click to talk (Web Speech API)">
+          🎙️
+        </button>
+        <div class="mic-glow-ring"></div>
+      </div>
+
+      <div class="input-box-wrapper">
+        <input 
+          type="text" 
+          id="chat-input" 
+          class="chat-input" 
+          placeholder="Ask Alexa+ (e.g. 'Restock from fastest supplier' or 'What are my pending invoices?')..."
+          autocomplete="off"
+        />
+        <button class="send-btn" id="send-btn" title="Send message">
+          ➤
+        </button>
+      </div>
+
+      <div class="speaking-indicator" id="speaking-wave">
+        <div class="wave-bar"></div>
+        <div class="wave-bar"></div>
+        <div class="wave-bar"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // State management
+    const sessionId = "web_session_" + Math.random().toString(36).substring(2, 9);
+    let isTTSActive = true;
+    let isRecognizing = false;
+    let recognition = null;
+
+    const conversationView = document.getElementById("conversation-view");
+    const chatInput = document.getElementById("chat-input");
+    const sendBtn = document.getElementById("send-btn");
+    const micBtn = document.getElementById("voice-mic-btn");
+    const ttsToggleBtn = document.getElementById("tts-toggle-btn");
+    const ttsStatusText = document.getElementById("tts-status-text");
+    const clearChatBtn = document.getElementById("clear-chat-btn");
+    const speakingWave = document.getElementById("speaking-wave");
+
+    // Initialize Web Speech API for voice recognition if available
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (SpeechRecognition) {
+      recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      recognition.lang = 'en-IN'; // Optimized for Indian English & INR currency
+
+      recognition.onstart = () => {
+        isRecognizing = true;
+        micBtn.classList.add("is-listening");
+        chatInput.placeholder = "Listening... Speak now...";
+      };
+
+      recognition.onresult = (event) => {
+        const transcript = event.results[0][0].transcript;
+        chatInput.value = transcript;
+        handleSendMessage();
+      };
+
+      recognition.onerror = (event) => {
+        console.warn("Speech recognition error:", event.error);
+        stopListening();
+      };
+
+      recognition.onend = () => {
+        stopListening();
+      };
+    } else {
+      micBtn.title = "Web Speech API not supported in this browser. Please type.";
+    }
+
+    function toggleListening() {
+      if (!recognition) {
+        alert("Web Speech API is not supported in this browser. You can type instructions directly.");
+        return;
+      }
+      if (isRecognizing) {
+        recognition.stop();
+        stopListening();
+      } else {
+        try {
+          recognition.start();
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    }
+
+    function stopListening() {
+      isRecognizing = false;
+      micBtn.classList.remove("is-listening");
+      chatInput.placeholder = "Ask Alexa+ (e.g. 'Restock from fastest supplier' or 'What are my pending invoices?')...";
+    }
+
+    micBtn.addEventListener("click", toggleListening);
+
+    // Text to Speech
+    function speakText(text) {
+      if (!isTTSActive || !window.speechSynthesis) return;
+      window.speechSynthesis.cancel(); // Stop ongoing speech
+
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 1.0;
+      utterance.pitch = 1.0;
+      
+      utterance.onstart = () => {
+        speakingWave.classList.add("active");
+      };
+      utterance.onend = () => {
+        speakingWave.classList.remove("active");
+      };
+      utterance.onerror = () => {
+        speakingWave.classList.remove("active");
+      };
+
+      window.speechSynthesis.speak(utterance);
+    }
+
+    ttsToggleBtn.addEventListener("click", () => {
+      isTTSActive = !isTTSActive;
+      if (isTTSActive) {
+        ttsToggleBtn.classList.add("active");
+        ttsStatusText.textContent = "Voice: ON";
+      } else {
+        window.speechSynthesis.cancel();
+        ttsToggleBtn.classList.remove("active");
+        ttsStatusText.textContent = "Voice: MUTED";
+        speakingWave.classList.remove("active");
+      }
+    });
+
+    clearChatBtn.addEventListener("click", () => {
+      conversationView.innerHTML = `
+        <div class="message-row alexa">
+          <div class="avatar alexa">🎙️</div>
+          <div class="message-body">
+            <div class="speech-bubble">
+              Conversation cleared. What would you like to check next?
+            </div>
+          </div>
+        </div>
+      `;
+    });
+
+    // Quick chips
+    document.querySelectorAll(".chip-btn").forEach(chip => {
+      chip.addEventListener("click", () => {
+        chatInput.value = chip.getAttribute("data-prompt");
+        handleSendMessage();
+      });
+    });
+
+    // Send Message
+    async function handleSendMessage() {
+      const text = chatInput.value.trim();
+      if (!text) return;
+
+      chatInput.value = "";
+      appendUserMessage(text);
+
+      // Show typing indicator
+      const typingEl = appendTypingIndicator();
+
+      try {
+        const response = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: text, session_id: sessionId })
+        });
+        const result = await response.json();
+
+        typingEl.remove();
+        appendAlexaResponse(result);
+        if (result.speech) {
+          speakText(result.speech);
+        }
+      } catch (err) {
+        typingEl.remove();
+        appendAlexaError("Unable to reach the MCP server. Please check your connection.");
+      }
+    }
+
+    sendBtn.addEventListener("click", handleSendMessage);
+    chatInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") handleSendMessage();
+    });
+
+    function appendUserMessage(text) {
+      const row = document.createElement("div");
+      row.className = "message-row user";
+      row.innerHTML = `
+        <div class="message-body">
+          <div class="speech-bubble">${escapeHtml(text)}</div>
+        </div>
+        <div class="avatar user">👤</div>
+      `;
+      conversationView.appendChild(row);
+      window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+    }
+
+    function appendTypingIndicator() {
+      const row = document.createElement("div");
+      row.className = "message-row alexa typing";
+      row.innerHTML = `
+        <div class="avatar alexa">🎙️</div>
+        <div class="message-body">
+          <div class="speech-bubble" style="display:flex; gap: 4px; align-items:center;">
+            <span>Alexa is reasoning</span>
+            <span style="animation: pulse 1s infinite">...</span>
+          </div>
+        </div>
+      `;
+      conversationView.appendChild(row);
+      window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+      return row;
+    }
+
+    function appendAlexaError(msg) {
+      const row = document.createElement("div");
+      row.className = "message-row alexa";
+      row.innerHTML = `
+        <div class="avatar alexa">⚠️</div>
+        <div class="message-body">
+          <div class="speech-bubble" style="border-color: var(--status-overdue)">${msg}</div>
+        </div>
+      `;
+      conversationView.appendChild(row);
+    }
+
+    function appendAlexaResponse(payload) {
+      const row = document.createElement("div");
+      row.className = "message-row alexa";
+
+      const speechText = payload.speech || "Here are the details.";
+      let cardHtml = "";
+
+      // Render structured card depending on tool/data
+      if (payload.data) {
+        cardHtml = generateStructuredCard(payload);
+      }
+
+      row.innerHTML = `
+        <div class="avatar alexa">🎙️</div>
+        <div class="message-body">
+          <div class="speech-bubble">
+            ${escapeHtml(speechText)}
+          </div>
+          <div class="speech-controls">
+            <button class="replay-btn" onclick="speakText(this.parentElement.previousElementSibling.innerText)">
+              🔊 Speak again
+            </button>
+          </div>
+          ${cardHtml}
+        </div>
+      `;
+
+      conversationView.appendChild(row);
+      window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+    }
+
+    // Card Generation
+    function generateStructuredCard(payload) {
+      const data = payload.data;
+      const tool = payload.tool;
+
+      // 1. Invoices Table Card
+      if (data.invoices && Array.isArray(data.invoices) && data.invoices.length > 0) {
+        const rows = data.invoices.slice(0, 8).map(inv => `
+          <tr>
+            <td><strong>${inv.invoice_no || 'N/A'}</strong></td>
+            <td>${inv.customer || (inv.customer_name || 'Customer')}</td>
+            <td style="color: var(--alexa-cyan); font-weight:600;">₹${Number(inv.amount).toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
+            <td><span class="pill pill-${inv.status || 'pending'}">${inv.status || 'pending'}</span></td>
+            <td>${inv.due_date || 'N/A'}</td>
+            <td>${inv.days_overdue ? `${inv.days_overdue} days` : '-'}</td>
+          </tr>
+        `).join("");
+
+        return `
+          <div class="card-container">
+            <div class="card-header">
+              <div class="card-title">📑 Invoices Overview (${data.count} Total)</div>
+              <span class="pill pill-pending">₹${Number(data.total_amount || 0).toLocaleString('en-IN', {minimumFractionDigits: 2})} Total</span>
+            </div>
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Invoice No</th>
+                  <th>Customer</th>
+                  <th>Amount</th>
+                  <th>Status</th>
+                  <th>Due Date</th>
+                  <th>Overdue</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        `;
+      }
+
+      // 2. Low-Stock Items Card
+      if (data.items && Array.isArray(data.items) && (tool === 'get_low_stock_items' || (!data.draft_id && !data.plan_steps))) {
+        const rows = data.items.map(item => `
+          <tr>
+            <td><code>${item.sku}</code></td>
+            <td><strong>${item.name}</strong></td>
+            <td style="color: var(--status-overdue); font-weight:700;">${item.stock_qty}</td>
+            <td>${item.reorder_level}</td>
+            <td>${item.supplier}</td>
+            <td><span class="pill pill-draft">${item.lead_time_days || 7}d lead</span></td>
+          </tr>
+        `).join("");
+
+        return `
+          <div class="card-container">
+            <div class="card-header">
+              <div class="card-title">⚠️ Low Stock Shortage (${data.count || data.items.length} Items)</div>
+              <button class="btn-action-primary" onclick="triggerReplenishFastest()">
+                ⚡ Restock Fastest Vendor
+              </button>
+            </div>
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>SKU</th>
+                  <th>Item Name</th>
+                  <th>Current Stock</th>
+                  <th>Reorder Level</th>
+                  <th>Supplier</th>
+                  <th>Fulfillment</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        `;
+      }
+
+      // 3. Purchase Order Draft Card (with Confirm Button!)
+      if (data.draft_id && data.status === 'draft') {
+        const itemsList = data.items ? data.items.map(i => `
+          <li style="margin-bottom: 4px;">&bull; <strong>${i.name}</strong> (${i.sku}) &mdash; Vendor: ${i.supplier}</li>
+        `).join("") : "";
+
+        return `
+          <div class="card-container" id="card-${data.draft_id}">
+            <div class="card-header">
+              <div class="card-title">📦 Purchase Order Draft: <span style="color:var(--alexa-cyan);">${data.draft_id}</span></div>
+              <span class="pill pill-draft" id="status-pill-${data.draft_id}">STATUS: DRAFT</span>
+            </div>
+            <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 10px;">
+              Created draft order for <strong>${data.suppliers ? data.suppliers.join(', ') : 'Suppliers'}</strong> covering <strong>${data.items_count || data.items?.length || 0} items</strong> (Total quantity: ${data.total_quantity || 'N/A'}).
+            </p>
+            ${itemsList ? `<ul style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 14px; list-style: none;">${itemsList}</ul>` : ''}
+            <div style="display:flex; gap: 10px; align-items:center;">
+              <button class="btn-action-primary" id="btn-confirm-po" onclick="confirmPurchaseOrder('${data.draft_id}')">
+                ✅ Confirm Purchase Order
+              </button>
+              <small style="color: var(--text-dim);">Requires your confirmation before database update</small>
+            </div>
+          </div>
+        `;
+      }
+
+      // 4. Confirmed Purchase Order Card
+      if (data.status === 'confirmed') {
+        return `
+          <div class="card-container" style="border-color: rgba(16, 185, 129, 0.4);">
+            <div class="card-header">
+              <div class="card-title">✅ Order Confirmed: <span style="color:var(--status-paid);">${data.draft_id || 'PO'}</span></div>
+              <span class="pill pill-confirmed">STATUS: CONFIRMED</span>
+            </div>
+            <p style="font-size: 0.86rem; color: var(--text-muted);">
+              Purchase order status has been updated to <strong>CONFIRMED</strong> in the ERP database. Supplier fulfillment in progress.
+            </p>
+          </div>
+        `;
+      }
+
+      // 5. Amazon Bedrock Supply Chain Planner Card
+      if (data.plan_steps && Array.isArray(data.plan_steps)) {
+        const steps = data.plan_steps.map((step, idx) => `
+          <div class="step-item">
+            <div class="step-dot">${idx + 1}</div>
+            <div>${step}</div>
+          </div>
+        `).join("");
+
+        return `
+          <div class="card-container" style="border-color: var(--border-active);">
+            <div class="card-header">
+              <div class="card-title">
+                ☁️ Amazon Bedrock Plan
+                <span class="pill pill-draft" style="font-size: 0.65rem;">${data.model_id || 'Nova'}</span>
+              </div>
+              <span class="pill pill-draft">Draft ID: ${data.draft_id}</span>
+            </div>
+            <div class="step-timeline">${steps}</div>
+            <div style="margin-top: 14px; display:flex; gap: 10px; align-items:center;">
+              <button class="btn-action-primary" onclick="confirmPurchaseOrder('${data.draft_id}')">
+                ✅ Confirm Bedrock Plan
+              </button>
+              <small style="color: var(--text-dim);">Voice confirmation active in session</small>
+            </div>
+          </div>
+        `;
+      }
+
+      // 6. Pending Leaves Card
+      if (data.pending_leaves && Array.isArray(data.pending_leaves)) {
+        const leaveItems = data.pending_leaves.map(req => `
+          <div style="background: rgba(255,255,255,0.03); padding: 10px 14px; border-radius: 8px; margin-bottom: 8px; display:flex; justify-content:space-between; align-items:center;">
+            <div>
+              <strong>${req.employee}</strong> &bull; <small style="color: var(--text-dim);">${req.department}</small><br>
+              <small style="color: var(--alexa-cyan);">${req.from_date} &rarr; ${req.to_date}</small> &bull; <em>"${req.reason || 'Personal'}"</em>
+            </div>
+            <div style="display:flex; gap: 6px;">
+              <button class="btn-action-primary" style="padding: 4px 10px; font-size: 0.75rem;" onclick="approveEmployeeLeave('${req.employee}')">Approve</button>
+              <button class="btn-action-secondary" style="padding: 4px 10px; font-size: 0.75rem;" onclick="rejectEmployeeLeave('${req.employee}')">Reject</button>
+            </div>
+          </div>
+        `).join("");
+
+        return `
+          <div class="card-container">
+            <div class="card-header">
+              <div class="card-title">📅 Pending Leave Requests (${data.count} Total)</div>
+              <span class="pill pill-pending">Review Pending</span>
+            </div>
+            ${leaveItems}
+          </div>
+        `;
+      }
+
+      // 7. Top Customers Follow-up Card
+      if (data.top_customers && Array.isArray(data.top_customers)) {
+        const custRows = data.top_customers.map((c, i) => `
+          <tr>
+            <td><strong>#${i + 1} ${c.customer}</strong></td>
+            <td style="color: var(--alexa-cyan); font-weight:700;">₹${Number(c.amount || c.pending_amount || 0).toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
+          </tr>
+        `).join("");
+
+        return `
+          <div class="card-container">
+            <div class="card-header">
+              <div class="card-title">👥 Top Customers (${data.context || 'Query'})</div>
+            </div>
+            <table class="data-table">
+              <thead><tr><th>Customer Name</th><th>Outstanding Amount</th></tr></thead>
+              <tbody>${custRows}</tbody>
+            </table>
+          </div>
+        `;
+      }
+
+      return "";
+    }
+
+    // Direct actions from Card buttons
+    async function confirmPurchaseOrder(draftId) {
+      appendUserMessage("Confirm draft order " + (draftId || ""));
+      const typingEl = appendTypingIndicator();
+
+      try {
+        const response = await fetch("/api/tool", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            tool_name: "confirm_purchase_order",
+            arguments: { draft_id: draftId },
+            session_id: sessionId
+          })
+        });
+        const result = await response.json();
+        typingEl.remove();
+        appendAlexaResponse(result);
+        if (result.speech) speakText(result.speech);
+
+        // Update card status if present
+        const pill = document.getElementById("status-pill-" + draftId);
+        if (pill) {
+          pill.className = "pill pill-confirmed";
+          pill.textContent = "STATUS: CONFIRMED";
+        }
+      } catch (err) {
+        typingEl.remove();
+        appendAlexaError("Failed to confirm purchase order.");
+      }
+    }
+
+    async function triggerReplenishFastest() {
+      chatInput.value = "Restock everything that's running low from the fastest supplier";
+      handleSendMessage();
+    }
+
+    async function approveEmployeeLeave(empName) {
+      appendUserMessage("Approve leave for " + empName);
+      const typingEl = appendTypingIndicator();
+      try {
+        const response = await fetch("/api/tool", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            tool_name: "approve_leave",
+            arguments: { employee_name: empName, confirm: true },
+            session_id: sessionId
+          })
+        });
+        const result = await response.json();
+        typingEl.remove();
+        appendAlexaResponse(result);
+        if (result.speech) speakText(result.speech);
+      } catch (e) {
+        typingEl.remove();
+        appendAlexaError("Failed to approve leave.");
+      }
+    }
+
+    async function rejectEmployeeLeave(empName) {
+      appendUserMessage("Reject leave for " + empName);
+      const typingEl = appendTypingIndicator();
+      try {
+        const response = await fetch("/api/tool", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            tool_name: "reject_leave",
+            arguments: { employee_name: empName, reason: "Project deadline", confirm: true },
+            session_id: sessionId
+          })
+        });
+        const result = await response.json();
+        typingEl.remove();
+        appendAlexaResponse(result);
+        if (result.speech) speakText(result.speech);
+      } catch (e) {
+        typingEl.remove();
+        appendAlexaError("Failed to reject leave.");
+      }
+    }
+
+    function escapeHtml(str) {
+      if (!str) return "";
+      return str
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+  </script>
+</body>
+</html>

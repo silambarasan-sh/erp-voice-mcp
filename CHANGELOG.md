@@ -5,6 +5,25 @@ All notable changes to the **ERP Voice Agent** project will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-10-08
+
+### Added
+- **Alexa+ Web Chat Simulator Interface (`/chat` & `/`)**:
+  - Embedded web client served directly by the Starlette ASGI application providing a full visual fallback demo for Alexa+.
+  - **Voice Input**: Integrates browser **Web Speech API** (`webkitSpeechRecognition`) with pulsing glowing mic animations.
+  - **Voice Output**: Integrates browser **`speechSynthesis`** with volume/mute controls and real-time audio wave visualizers.
+  - **Interactive Result Cards**:
+    - *Invoice Table Card*: Detailed invoices with customer, currency amount (INR), status badges, and overdue indicators.
+    - *Low-Stock List Card*: Shortage items, stock vs reorder level progress, supplier lead times, and one-click restocking button.
+    - *PO Draft Card with Confirm Button*: Displays drafted orders with an inline **Confirm Purchase Order** button that updates SQLite state and transforms into an emerald confirmed pill.
+    - *Leave Requests Card*: Actionable cards with inline **Approve** and **Reject** buttons.
+    - *Amazon Bedrock Plan Card*: Multi-step plan execution trace timeline with model tags and confirmation trigger.
+- **REST & Web Bridge API (`/api/chat` & `/api/tool`)**:
+  - `/api/chat`: Natural language intent router linking user speech/text to MCP tools.
+  - `/api/tool`: Direct tool execution bridge enabling UI card buttons to invoke MCP tools.
+- **Pytest Web Suite (`tests/test_web_chat.py`)**:
+  - Tests covering HTML template rendering, root endpoint browser redirection, replenishment intent routing, invoice querying, voice confirmation, and direct tool calling.
+
 ## [1.4.0] - 2026-10-08
 
 ### Added

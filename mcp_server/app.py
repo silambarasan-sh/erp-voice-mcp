@@ -40,6 +40,166 @@ class MCPProtocolVersionMiddleware:
         await self.app(scope, receive, send_wrapper)
 
 
+from pathlib import Path
+from starlette.responses import HTMLResponse, JSONResponse
+from erp_core.services import VoiceERPToolsService, VoiceBriefingService
+from aws_planner.agent import ERPPlannerAgent
+
+TEMPLATES_DIR = Path(__file__).parent / "templates"
+CHAT_HTML_PATH = TEMPLATES_DIR / "chat.html"
+
+
+async def chat_page(request: Request) -> HTMLResponse:
+    """Serve the Alexa+ web chat simulator HTML page."""
+    if CHAT_HTML_PATH.exists():
+        content = CHAT_HTML_PATH.read_text(encoding="utf-8")
+    else:
+        content = "<h1>Alexa+ ERP Web Chat</h1><p>Template not found.</p>"
+    return HTMLResponse(content)
+
+
+async def chat_api(request: Request) -> JSONResponse:
+    """Natural language chat endpoint routing messages to MCP voice tools."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    message = body.get("message", "").strip()
+    session_id = body.get("session_id", "default")
+    lower = message.lower()
+
+    tool_name = "general"
+    response_payload = {}
+
+    if any(k in lower for k in ["confirm", "confirm it", "yes confirm", "proceed"]):
+        tool_name = "confirm_action"
+        response_payload = await sync_to_async(VoiceERPToolsService.confirm_action)(session_id=session_id)
+
+    elif any(k in lower for k in ["restock", "fastest supplier", "replenish", "plan"]):
+        tool_name = "plan_erp_replenishment"
+        response_payload = await sync_to_async(ERPPlannerAgent.plan_and_execute)(prompt=message, session_id=session_id)
+
+    elif any(k in lower for k in ["top 3 customer", "top customer", "customers for that"]):
+        tool_name = "get_top_customers"
+        response_payload = await sync_to_async(VoiceERPToolsService.get_top_customers)(session_id=session_id)
+
+    elif "overdue" in lower:
+        tool_name = "get_overdue_invoices"
+        response_payload = await sync_to_async(VoiceERPToolsService.get_overdue_invoices)(session_id=session_id)
+
+    elif any(k in lower for k in ["pending invoice", "unpaid invoice", "invoice"]):
+        tool_name = "get_pending_invoices"
+        month = None
+        for m in ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"]:
+            if m in lower:
+                month = m
+                break
+        response_payload = await sync_to_async(VoiceERPToolsService.get_pending_invoices)(month=month, session_id=session_id)
+
+    elif any(k in lower for k in ["low stock", "shortage", "inventory"]):
+        tool_name = "get_low_stock_items"
+        response_payload = await sync_to_async(VoiceERPToolsService.get_low_stock_items)()
+
+    elif any(k in lower for k in ["leave", "vacation", "time off"]):
+        tool_name = "get_pending_leaves"
+        response_payload = await sync_to_async(VoiceERPToolsService.get_pending_leaves)()
+
+    elif any(k in lower for k in ["sales", "revenue"]):
+        tool_name = "get_sales_summary"
+        period = "today" if "today" in lower else ("week" if "week" in lower else "month")
+        response_payload = await sync_to_async(VoiceERPToolsService.get_sales_summary)(period=period, session_id=session_id)
+
+    elif "draft" in lower and ("order" in lower or "po" in lower or "purchase" in lower):
+        tool_name = "draft_purchase_order"
+        response_payload = await sync_to_async(VoiceERPToolsService.draft_purchase_order)(session_id=session_id)
+
+    else:
+        # Fallback to daily executive briefing
+        tool_name = "voice_daily_erp_briefing"
+        briefing = await sync_to_async(VoiceBriefingService.get_daily_briefing)()
+        response_payload = {
+            "speech": briefing.get("voice_summary", "Here is your ERP briefing."),
+            "data": briefing,
+        }
+
+    return JSONResponse(
+        {
+            "tool": tool_name,
+            "speech": response_payload.get("speech", response_payload.get("voice_summary", "")),
+            "data": response_payload.get("data", response_payload),
+        }
+    )
+
+
+async def tool_api(request: Request) -> JSONResponse:
+    """Direct tool invocation API for card interactive buttons."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    tool_name = body.get("tool_name", "")
+    args = body.get("arguments", {})
+    session_id = body.get("session_id", "default")
+    args["session_id"] = session_id
+
+    result = {}
+    if tool_name == "confirm_purchase_order":
+        result = await sync_to_async(VoiceERPToolsService.confirm_purchase_order)(
+            draft_id=args.get("draft_id"),
+            session_id=session_id,
+        )
+    elif tool_name == "draft_purchase_order":
+        result = await sync_to_async(VoiceERPToolsService.draft_purchase_order)(
+            item_skus=args.get("item_skus"),
+            session_id=session_id,
+        )
+    elif tool_name == "approve_leave":
+        result = await sync_to_async(VoiceERPToolsService.approve_leave)(
+            employee_name=args.get("employee_name", ""),
+            confirm=args.get("confirm", True),
+            session_id=session_id,
+        )
+    elif tool_name == "reject_leave":
+        result = await sync_to_async(VoiceERPToolsService.reject_leave)(
+            employee_name=args.get("employee_name", ""),
+            reason=args.get("reason", "Administrative decision"),
+            confirm=args.get("confirm", True),
+            session_id=session_id,
+        )
+    elif tool_name == "confirm_action":
+        result = await sync_to_async(VoiceERPToolsService.confirm_action)(session_id=session_id)
+    elif tool_name == "get_top_customers":
+        result = await sync_to_async(VoiceERPToolsService.get_top_customers)(session_id=session_id)
+    elif tool_name == "get_pending_invoices":
+        result = await sync_to_async(VoiceERPToolsService.get_pending_invoices)(
+            month=args.get("month"),
+            session_id=session_id,
+        )
+    elif tool_name == "get_low_stock_items":
+        result = await sync_to_async(VoiceERPToolsService.get_low_stock_items)()
+    elif tool_name == "get_overdue_invoices":
+        result = await sync_to_async(VoiceERPToolsService.get_overdue_invoices)(session_id=session_id)
+    elif tool_name == "get_pending_leaves":
+        result = await sync_to_async(VoiceERPToolsService.get_pending_leaves)()
+    elif tool_name == "plan_erp_replenishment":
+        result = await sync_to_async(ERPPlannerAgent.plan_and_execute)(
+            prompt=args.get("prompt", "Restock running low"),
+            session_id=session_id,
+        )
+    else:
+        return JSONResponse({"error": f"Unknown tool: {tool_name}"}, status_code=400)
+
+    return JSONResponse(
+        {
+            "tool": tool_name,
+            "speech": result.get("speech", ""),
+            "data": result.get("data", result),
+        }
+    )
+
+
 async def health_check(request: Request) -> JSONResponse:
     """Health check endpoint providing server metadata and supported MCP version."""
     from django.db import connection
@@ -64,12 +224,17 @@ async def health_check(request: Request) -> JSONResponse:
             "mcp_endpoint": MCP_PATH,
             "database_connected": db_ok,
             "voice_assistant_target": "Alexa+",
+            "web_chat_demo": "/chat",
         }
     )
 
 
-async def root_info(request: Request) -> JSONResponse:
-    """Root info endpoint directing clients to the MCP Streamable HTTP endpoint."""
+async def root_info(request: Request):
+    """Root info endpoint: serves web chat in browser or JSON metadata for API clients."""
+    accept = request.headers.get("accept", "")
+    if "text/html" in accept:
+        return await chat_page(request)
+
     return JSONResponse(
         {
             "name": "ERP Voice Agent",
@@ -77,15 +242,19 @@ async def root_info(request: Request) -> JSONResponse:
             "mcp_spec_version": MCP_SPEC_VERSION,
             "streamable_http_url": f"{MCP_PATH}",
             "health_check_url": "/health",
+            "web_chat_url": "/chat",
         }
     )
 
 
 def create_app() -> Starlette:
-    """Create and configure the Starlette application with MCP Streamable HTTP."""
+    """Create and configure the Starlette application with MCP Streamable HTTP and web chat."""
     base_app: Starlette = mcp_server.streamable_http_app(streamable_http_path=MCP_PATH)
 
-    # Register additional helper routes
+    # Register web chat & API helper routes
+    base_app.add_route("/chat", chat_page, methods=["GET"])
+    base_app.add_route("/api/chat", chat_api, methods=["POST"])
+    base_app.add_route("/api/tool", tool_api, methods=["POST"])
     base_app.add_route("/health", health_check, methods=["GET"])
     base_app.add_route("/", root_info, methods=["GET"])
 
@@ -95,3 +264,4 @@ def create_app() -> Starlette:
 
 
 app = create_app()
+

@@ -6,7 +6,7 @@
 [![MCP Spec](https://img.shields.io/badge/MCP%20Spec-2025--11--25-blue.svg)](https://modelcontextprotocol.io)
 [![Django](https://img.shields.io/badge/Django-5.2-green.svg)](https://www.djangoproject.com/)
 [![AWS Bedrock](https://img.shields.io/badge/AWS-Bedrock%20%2B%20Strands-orange.svg)](docs/AWS_USAGE.md)
-[![Tests](https://img.shields.io/badge/pytest-55%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/pytest-61%20passed-brightgreen.svg)]()
 
 ---
 
@@ -211,8 +211,23 @@ uvicorn mcp_server.app:app --host 127.0.0.1 --port 8000
 ```
 
 - **MCP Endpoint**: `http://127.0.0.1:8000/mcp`
+- **Web Chat Simulator**: `http://127.0.0.1:8000/chat` (or `http://127.0.0.1:8000/` in browser)
 - **Health Check**: `http://127.0.0.1:8000/health`
-- **Root Info**: `http://127.0.0.1:8000/`
+
+---
+
+## 🎙️ Alexa+ Web Chat Simulator (Fallback Demo)
+
+A visual and voice-interactive web client is served directly by the application at **`http://127.0.0.1:8000/chat`**:
+- **Microphone / Voice Input**: Uses the browser **Web Speech API** (`webkitSpeechRecognition`) with pulsing voice detection animations.
+- **Voice Output (TTS)**: Reads Alexa responses aloud using the browser **`speechSynthesis`** API with mute and replay controls.
+- **Rich Cards**:
+  - **Invoice Table Card**: Filtered views with Indian Rupee formatting and status tags.
+  - **Low-Stock List Card**: Stock level visual meters with supplier fulfillment lead times.
+  - **Purchase Order Draft Card**: Displays generated draft orders with an interactive **Confirm Purchase Order** button.
+  - **Pending Leaves Card**: Employee requests with inline **Approve** and **Reject** buttons.
+  - **Amazon Bedrock Plan Card**: Visualizes multi-step planning execution traces.
+- **REST & Tool Bridge**: Supports both conversational routing (`/api/chat`) and direct tool execution (`/api/tool`).
 
 ---
 
@@ -223,7 +238,7 @@ Run the complete test suite with pytest:
 python -m pytest -v
 ```
 
-All **55 tests** validate:
+All **61 tests** validate:
 - Models: Customer, Supplier, Item, Invoice, PurchaseOrder, PurchaseOrderLine, Employee, LeaveRequest
 - Management command: `seed_demo_data` (counts, data integrity, idempotency)
 - Domain services: Invoices, Inventory, POs, HR Leave
@@ -232,6 +247,7 @@ All **55 tests** validate:
 - Leave approval and rejection ask-then-confirm patterns
 - Conversational session state memory and follow-up tools (`get_top_customers`, `confirm_action`)
 - **Amazon Bedrock & Strands ERP Planner Agent**: multi-step inventory planning, fastest supplier optimization, draft creation, and confirmation
+- **Alexa+ Web Chat Simulator**: HTML page serving, browser root routing, voice API endpoints, and direct tool execution
 - MCP protocol spec `2025-11-25` and Streamable HTTP endpoints
 
 ---
