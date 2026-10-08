@@ -127,6 +127,20 @@ async def get_top_customers(session_id: str = "default") -> Dict[str, Any]:
     )
 
 
+@mcp_server.tool()
+async def get_purchase_order_status(session_id: str = "default") -> Dict[str, Any]:
+    """Retrieve purchase order status breakdown including counts of draft vs confirmed orders and latest recent orders.
+
+    Alexa reads the short speech summary aloud.
+
+    Args:
+        session_id: Conversational session identifier.
+    """
+    return await sync_to_async(VoiceERPToolsService.get_purchase_order_status)(
+        session_id=session_id,
+    )
+
+
 # ============================================================================
 # Action Tools with Ask-Then-Confirm Pattern
 # ============================================================================

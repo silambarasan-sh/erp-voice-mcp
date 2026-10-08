@@ -104,7 +104,7 @@ async def chat_api(request: Request) -> JSONResponse:
         tool_name = "get_overdue_invoices"
         response_payload = await sync_to_async(VoiceERPToolsService.get_overdue_invoices)(session_id=session_id)
 
-    elif any(k in lower for k in ["pending invoice", "unpaid invoice", "invoice"]):
+    elif any(k in lower for k in ["pending invoice", "unpaid invoice", "invoice status", "invoice"]):
         tool_name = "get_pending_invoices"
         month = None
         for m in ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"]:
@@ -113,13 +113,30 @@ async def chat_api(request: Request) -> JSONResponse:
                 break
         response_payload = await sync_to_async(VoiceERPToolsService.get_pending_invoices)(month=month, session_id=session_id)
 
-    elif any(k in lower for k in ["low stock", "shortage", "inventory"]):
+    elif any(k in lower for k in ["low stock", "stock status", "shortage", "inventory", "stock"]):
         tool_name = "get_low_stock_items"
         response_payload = await sync_to_async(VoiceERPToolsService.get_low_stock_items)()
 
-    elif any(k in lower for k in ["leave", "vacation", "time off"]):
+    elif any(k in lower for k in ["pending leave status", "leave status", "leave", "vacation", "time off"]):
         tool_name = "get_pending_leaves"
         response_payload = await sync_to_async(VoiceERPToolsService.get_pending_leaves)()
+
+    elif any(k in lower for k in [
+        "po status",
+        "purchase order status",
+        "show purchase orders",
+        "show pos",
+        "draft pos",
+        "draft po",
+        "pending pos",
+        "pending po",
+        "how many pos",
+        "how many purchase orders",
+        "list purchase orders",
+        "list pos",
+    ]) or (("purchase order" in lower or bool(re.search(r"\bpos?\b", lower))) and "status" in lower):
+        tool_name = "get_purchase_order_status"
+        response_payload = await sync_to_async(VoiceERPToolsService.get_purchase_order_status)(session_id=session_id)
 
     elif any(k in lower for k in ["sales", "revenue"]):
         tool_name = "get_sales_summary"
@@ -130,7 +147,15 @@ async def chat_api(request: Request) -> JSONResponse:
         tool_name = "draft_purchase_order"
         response_payload = await sync_to_async(VoiceERPToolsService.draft_purchase_order)(session_id=session_id)
 
-    elif any(k in lower for k in ["briefing", "daily briefing", "summary", "overview", "status"]):
+    elif any(k in lower for k in [
+        "daily briefing",
+        "briefing",
+        "summary",
+        "overview",
+        "erp status",
+        "overall status",
+        "what's happening today",
+    ]):
         # Explicit daily executive briefing request
         tool_name = "voice_daily_erp_briefing"
         briefing = await sync_to_async(VoiceBriefingService.get_daily_briefing)()
@@ -268,6 +293,8 @@ async def tool_api(request: Request) -> JSONResponse:
         result = await sync_to_async(VoiceERPToolsService.get_overdue_invoices)(session_id=session_id)
     elif tool_name == "get_pending_leaves":
         result = await sync_to_async(VoiceERPToolsService.get_pending_leaves)()
+    elif tool_name == "get_purchase_order_status":
+        result = await sync_to_async(VoiceERPToolsService.get_purchase_order_status)(session_id=session_id)
     elif tool_name == "plan_erp_replenishment":
         result = await sync_to_async(ERPPlannerAgent.plan_and_execute)(
             prompt=args.get("prompt", "Restock running low"),

@@ -28,6 +28,7 @@ def test_registered_mcp_tools():
         "get_pending_leaves",
         "get_sales_summary",
         "get_top_customers",
+        "get_purchase_order_status",
         "draft_purchase_order",
         "confirm_purchase_order",
         "approve_leave",

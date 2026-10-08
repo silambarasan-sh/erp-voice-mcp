@@ -805,6 +805,61 @@ class VoiceERPToolsService:
             },
         }
 
+    @classmethod
+    def get_purchase_order_status(cls, session_id: str = "default") -> Dict[str, Any]:
+        """Query purchase order status breakdown including draft vs confirmed counts and latest orders.
+
+        Reuses PurchaseOrderService.list_purchase_orders to avoid duplicate logic.
+        """
+        po_result = PurchaseOrderService.list_purchase_orders()
+        orders = po_result.get("purchase_orders", [])
+        total_count = len(orders)
+        draft_count = sum(1 for po in orders if po.get("status") == "draft")
+        confirmed_count = sum(1 for po in orders if po.get("status") == "confirmed")
+
+        # Latest few orders (up to 5) with supplier and item count
+        recent_orders = []
+        for po in orders[:5]:
+            lines = po.get("line_items", [])
+            total_qty = sum(item.get("qty", 0) for item in lines)
+            recent_orders.append({
+                "id": po.get("id"),
+                "supplier": po.get("supplier_name"),
+                "status": po.get("status"),
+                "created_at": po.get("created_at"),
+                "item_count": len(lines),
+                "total_quantity": total_qty,
+            })
+
+        if total_count == 0:
+            speech = "There are no purchase orders in the system."
+        elif draft_count > 0:
+            speech = (
+                f"You have {total_count} purchase orders: {draft_count} in draft status waiting for confirmation, "
+                f"and {confirmed_count} confirmed."
+            )
+        else:
+            speech = f"You have {total_count} purchase orders, all {confirmed_count} are confirmed."
+
+        data = {
+            "total_count": total_count,
+            "draft_count": draft_count,
+            "confirmed_count": confirmed_count,
+            "recent_orders": recent_orders,
+            "purchase_orders": orders,
+        }
+
+        VoiceSessionService.set_context(
+            session_id=session_id,
+            context_type="purchase_order_status",
+            data=data,
+        )
+
+        return {
+            "speech": speech,
+            "data": data,
+        }
+
     # =========================================================================
     # Action Tools with Confirmation & Session Follow-Up
     # =========================================================================

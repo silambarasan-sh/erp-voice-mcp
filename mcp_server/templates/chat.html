@@ -1167,6 +1167,43 @@
         `;
       }
 
+      // 8. Purchase Orders Status Card
+      if (data.recent_orders && Array.isArray(data.recent_orders)) {
+        const rows = data.recent_orders.map(po => `
+          <tr>
+            <td><strong>#${po.id}</strong></td>
+            <td>${escapeHtml(po.supplier || 'N/A')}</td>
+            <td><span class="pill pill-${po.status === 'confirmed' ? 'confirmed' : 'draft'}">${(po.status || 'draft').toUpperCase()}</span></td>
+            <td>${po.item_count} items (${po.total_quantity} units)</td>
+            <td>${po.created_at ? po.created_at.slice(0, 10) : '-'}</td>
+          </tr>
+        `).join("");
+
+        return `
+          <div class="card-container">
+            <div class="card-header">
+              <div class="card-title">📦 Purchase Orders Overview (${data.total_count} Total)</div>
+              <div>
+                <span class="pill pill-draft" style="margin-right: 6px;">${data.draft_count} Draft</span>
+                <span class="pill pill-confirmed">${data.confirmed_count} Confirmed</span>
+              </div>
+            </div>
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>PO #</th>
+                  <th>Supplier</th>
+                  <th>Status</th>
+                  <th>Items / Qty</th>
+                  <th>Date</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        `;
+      }
+
       return "";
     }
 

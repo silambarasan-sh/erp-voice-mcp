@@ -5,6 +5,18 @@ All notable changes to the **ERP Voice Agent** project will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] - 2026-10-08
+
+### Fixed
+- **Purchase Order Status Intent & Strict Daily Briefing Triggers**:
+  - Added dedicated read-only MCP tool `get_purchase_order_status` on `VoiceERPToolsService` and `mcp_server`, returning counts of draft vs confirmed orders, latest orders with supplier and item counts, and a concise spoken summary.
+  - Added chat intent routing for purchase order queries (`"PO status"`, `"purchase order status"`, `"show purchase orders"`, `"draft POs"`, `"pending POs"`, `"how many POs"`).
+  - Restricted `daily_briefing` intent so the bare word `"status"` no longer triggers it; only triggers on explicit phrases (`"briefing"`, `"daily briefing"`, `"summary"`, `"overview"`, `"erp status"`, `"overall status"`, `"what's happening today"`).
+  - Ensured specific `<thing> status` queries (`"leave status"`, `"pending leave status"`, `"invoice status"`, `"stock status"`) route to their respective domain tools before general fallback.
+  - Confirmed `"okay confirm it"` and `"ok confirm"` route to `confirm_action`, while bare `"ok"` routes to `thanks`.
+  - Added visual Purchase Orders status card rendering in the Web Chat interface.
+  - Added 5 new tests in `tests/test_web_chat.py` and `tests/test_voice_mcp_tools.py` (82 total tests passing).
+
 ## [1.7.0] - 2026-10-08
 
 ### Fixed

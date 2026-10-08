@@ -127,3 +127,23 @@ async def test_get_sales_summary_tool_periods():
         speech = res["speech"]
         assert "sales summary" in speech.lower()
         assert "rupees" in speech.lower()
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.asyncio
+async def test_get_purchase_order_status_tool():
+    """Verify get_purchase_order_status returns counts of draft vs confirmed orders and recent orders."""
+    from mcp_server.server import get_purchase_order_status
+
+    res = await get_purchase_order_status()
+    assert "speech" in res
+    assert "data" in res
+
+    data = res["data"]
+    assert "total_count" in data
+    assert "draft_count" in data
+    assert "confirmed_count" in data
+    assert "recent_orders" in data
+    assert data["total_count"] == data["draft_count"] + data["confirmed_count"]
+    assert "purchase orders" in res["speech"].lower()
+

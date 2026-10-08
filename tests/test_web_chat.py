@@ -190,13 +190,91 @@ def test_chat_api_routing_help(web_client):
 @pytest.mark.django_db(transaction=True)
 def test_chat_api_routing_daily_briefing_explicit_only(web_client):
     """Verify daily briefing is ONLY returned when explicit briefing/overview/summary is requested."""
-    for phrase in ["give me the daily briefing", "system overview", "executive summary", "status"]:
+    for phrase in [
+        "give me the daily briefing",
+        "daily briefing",
+        "system overview",
+        "executive summary",
+        "erp status",
+        "overall status",
+        "what's happening today",
+    ]:
         response = web_client.post("/api/chat", json={"message": phrase, "session_id": "test_briefing"})
         assert response.status_code == 200
         data = response.json()
         assert data["tool"] == "voice_daily_erp_briefing"
         assert "speech" in data
         assert "data" in data
+
+
+@pytest.mark.django_db(transaction=True)
+def test_chat_api_routing_status_alone_hits_polite_fallback(web_client):
+    """Verify the bare word 'status' does NOT trigger daily briefing, but hits polite fallback."""
+    response = web_client.post("/api/chat", json={"message": "status", "session_id": "test_bare_status"})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["tool"] == "unrecognized"
+    assert data["tool"] != "voice_daily_erp_briefing"
+    assert "briefing" not in data["tool"]
+    assert "invoices" in data["speech"].lower()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_chat_api_routing_purchase_order_status(web_client):
+    """Verify 'PO status', 'purchase order status', and 'draft POs' route to get_purchase_order_status."""
+    for phrase in ["PO status", "purchase order status", "draft POs", "pending POs", "show purchase orders", "how many POs"]:
+        response = web_client.post("/api/chat", json={"message": phrase, "session_id": "test_po_status"})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["tool"] == "get_purchase_order_status"
+        assert data["tool"] != "voice_daily_erp_briefing"
+        assert data["tool"] != "draft_purchase_order"
+        assert "purchase orders" in data["speech"].lower()
+        assert "total_count" in data["data"]
+        assert "draft_count" in data["data"]
+        assert "confirmed_count" in data["data"]
+        assert "recent_orders" in data["data"]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_chat_api_routing_confirm_vs_thanks(web_client):
+    """Verify 'okay confirm it' and 'ok confirm' route to confirm_action, while bare 'ok' gets thanks."""
+    # Confirm variations
+    for phrase in ["okay confirm it", "ok confirm", "confirm it"]:
+        response = web_client.post("/api/chat", json={"message": phrase, "session_id": "test_confirm_var"})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["tool"] == "confirm_action"
+
+    # Bare "ok" -> thanks / closing
+    response_ok = web_client.post("/api/chat", json={"message": "ok", "session_id": "test_ok_bare"})
+    assert response_ok.status_code == 200
+    data_ok = response_ok.json()
+    assert data_ok["tool"] == "thanks"
+    assert not data_ok["data"]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_chat_api_routing_other_thing_status_queries(web_client):
+    """Verify '<thing> status' queries route to their own specific domain tool first."""
+    # Leave status -> get_pending_leaves
+    res_leave = web_client.post("/api/chat", json={"message": "leave status", "session_id": "test_thing_status"})
+    assert res_leave.status_code == 200
+    assert res_leave.json()["tool"] == "get_pending_leaves"
+
+    res_pending_leave = web_client.post("/api/chat", json={"message": "pending leave status", "session_id": "test_thing_status"})
+    assert res_pending_leave.status_code == 200
+    assert res_pending_leave.json()["tool"] == "get_pending_leaves"
+
+    # Invoice status -> get_pending_invoices
+    res_inv = web_client.post("/api/chat", json={"message": "invoice status", "session_id": "test_thing_status"})
+    assert res_inv.status_code == 200
+    assert res_inv.json()["tool"] == "get_pending_invoices"
+
+    # Stock status -> get_low_stock_items
+    res_stock = web_client.post("/api/chat", json={"message": "stock status", "session_id": "test_thing_status"})
+    assert res_stock.status_code == 200
+    assert res_stock.json()["tool"] == "get_low_stock_items"
 
 
 @pytest.mark.django_db(transaction=True)
@@ -207,4 +285,5 @@ def test_chat_api_routing_low_stock_items(web_client):
     data = response.json()
     assert data["tool"] == "get_low_stock_items"
     assert "items" in data["data"]
+
 
