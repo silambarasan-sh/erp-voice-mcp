@@ -1,6 +1,6 @@
 # AWS Usage & Architecture: ERP Voice Agent ☁️🎙️
 
-> **AWS Builder Challenge Submission**: Comprehensive documentation of AWS cloud services, architectural roles, and design decisions powering the **ERP Voice Agent**.
+> **AWS Builder Challenge Submission**: Technical documentation of the Amazon Bedrock integration and live foundation model invocation powering the **ERP Voice Agent**.
 
 ---
 
@@ -43,72 +43,67 @@ The **ERP Voice Agent** integrates **Amazon Bedrock** Foundation Models with an 
 
 ## ☁️ 2. AWS Services Used & Justification
 
-### 1. Amazon Bedrock
-- **Role**: Foundation Model Orchestration & Natural Language Reasoning Engine.
-- **Model Utilized**:
-  - `amazon.nova-micro-v1:0` (Fast, cost-efficient Amazon Nova model for real-time voice latency and multi-step reasoning, configurable via `BEDROCK_MODEL_ID` in `.env`)
+The codebase interacts directly with **Amazon Bedrock** via the AWS SDK for Python (`boto3`).
+
+### Amazon Bedrock (`bedrock-runtime`)
+- **API Utilized**: `client.converse(...)` (Bedrock Converse API)
+- **Model Utilized**: `amazon.nova-micro-v1:0` (configured via `BEDROCK_MODEL_ID` in `.env`, with cross-region inference profiles such as `us.amazon.nova-micro-v1:0` supported)
+- **Authentication**:
+  - `AWS_BEARER_TOKEN_BEDROCK`: Bedrock API Key / Bearer token (picked up automatically by `boto3`).
+  - Standard AWS credentials (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`) or IAM execution roles.
+  - **Zero Key Logging**: Bearer tokens and credentials are never printed or logged.
 - **Why Bedrock**:
-  1. **Serverless Generative AI**: Zero GPU provisioning or infrastructure management.
-  2. **Low-Latency Converse API**: Delivers the near-instantaneous responses essential for natural Alexa+ voice interactions.
-  3. **Enterprise Data Privacy**: Ensures proprietary business ERP data (invoices, client records, purchase orders) is never used for foundation model training.
-  4. **Native Tool Use**: Seamlessly invokes Python functions as tools to inspect stock levels, compare supplier lead times, and generate purchase orders.
-
-### 2. AWS App Runner / Amazon ECS (Container Hosting)
-- **Role**: Scalable, fully-managed hosting for the Model Context Protocol (MCP) server.
-- **Why App Runner / ECS**:
-  1. Direct support for streaming ASGI HTTP servers (`Streamable HTTP` on `/mcp`).
-  2. Automatic horizontal scaling in response to concurrent voice queries.
-  3. Seamless integration with AWS VPC, AWS Secrets Manager, and IAM Roles.
-
-### 3. AWS Identity and Access Management (IAM)
-- **Role**: Least-Privilege Role-Based Access Control (RBAC).
-- **Policy Definition**:
-  ```json
-  {
-    "Version": "2012-10-17",
-    "Statement": [
-      {
-        "Effect": "Allow",
-        "Action": [
-          "bedrock:InvokeModel",
-          "bedrock:Converse"
-        ],
-        "Resource": [
-          "arn:aws:bedrock:*::foundation-model/amazon.nova-micro-v1:0"
-        ]
-      }
-    ]
-  }
-  ```
-- **Security Rule**: Zero hardcoded credentials. Reads region and model ID from environment variables, leveraging standard AWS credential providers (IAM Roles, AWS CLI profiles, or environment variables).
+  1. **Serverless Foundation Models**: Zero GPU provisioning or server maintenance.
+  2. **Low-Latency Converse API**: Structured request/response schema designed for conversational voice latency.
+  3. **Enterprise Privacy**: ERP data (invoices, client records, purchase orders) is never retained or used for foundation model training.
+  4. **Strict Safety Alignment**: Adheres to the ERP confirmation principle so orders strictly remain in `draft` state until user confirmation.
 
 ---
 
-## 🎯 3. The "ERP Planner Agent" Workflow
+## 🎯 3. What the Live Call Does
 
-When an executive speaks an instruction such as:
+When `AWS_MOCK_MODE=False` and an executive speaks a replenishment request such as:
 > *"Restock everything that's running low from the fastest supplier"*
 
-The **ERP Planner Agent** executes a multi-step plan:
+The agent executes a live Converse call:
+
+1. **Client Initialization**: Initializes `boto3.client("bedrock-runtime", region_name=AWSConfig.get_region())`.
+2. **Converse Invocation**:
+   ```python
+   response = client.converse(
+       modelId=AWSConfig.get_model_id(),
+       system=[{"text": "You are an ERP Supply Chain Planner Agent. You analyze warehouse stock, optimize supplier lead times, and formulate replenishment purchase order plans. Always adhere to the confirmation principle: never confirm without user approval."}],
+       messages=[{"role": "user", "content": [{"text": prompt}]}],
+       inferenceConfig={"temperature": 0.2, "maxTokens": 500},
+   )
+   ```
+3. **Structured Plan Formulation**:
+   - Queries inventory to identify items at or below reorder levels.
+   - Evaluates suppliers to pick the fastest vendor by lead time.
+   - Creates real draft purchase orders (`DRAFT-PO-4`) in SQLite via `VoiceERPToolsService.draft_purchase_order()`.
+   - Records Bedrock response metadata (`bedrock_response_status: response["stopReason"]`).
+4. **Transparent Badge & UI**:
+   - Sets `planner_mode: "bedrock"`.
+   - The Web Chat UI renders the emerald **`Bedrock (live)`** badge.
 
 ```mermaid
 sequenceDiagram
     autonumber
     actor User as Executive (Alexa+)
     participant MCP as MCP Server (/mcp)
-    participant Bedrock as Amazon Bedrock
+    participant Bedrock as Amazon Bedrock (Converse API)
     participant ERP as ERP Database (Django)
     participant Session as VoiceSessionService
 
     User->>MCP: "Restock everything that's running low from the fastest supplier"
-    MCP->>Bedrock: ERPPlannerAgent.plan_and_execute(prompt)
-    Bedrock->>ERP: tool_get_low_stock_items()
-    ERP-->>Bedrock: Returns 6 low-stock items with supplier details
-    Note over Bedrock: Evaluates supplier lead times.<br/>Identifies fastest supplier: Reliance (4 days).
-    Bedrock->>ERP: tool_draft_purchase_order(item_skus, status="draft")
-    ERP-->>Bedrock: Creates DRAFT PO (ID: DRAFT-PO-4)
-    Bedrock->>Session: Stages DRAFT-PO-4 for confirmation
-    Bedrock-->>MCP: Voice summary + structured plan data
+    MCP->>Bedrock: client.converse(modelId, messages=[prompt])
+    Bedrock-->>MCP: Bedrock Converse response (stopReason: "end_turn")
+    MCP->>ERP: Query low stock items & supplier lead times
+    ERP-->>MCP: Returns low-stock items with lead times
+    Note over MCP: Identifies fastest supplier: Reliance (4 days).
+    MCP->>ERP: draft_purchase_order(status="draft")
+    ERP-->>MCP: Creates DRAFT PO (ID: DRAFT-PO-4)
+    MCP->>Session: Stages DRAFT-PO-4 for confirmation
     MCP-->>User: "Reliance Industrial Polymers is the fastest supplier (4-day lead time). I drafted order DRAFT-PO-4 for 2 items. Would you like me to confirm it?"
     User->>MCP: "Confirm it"
     MCP->>ERP: confirm_action() -> changes status to confirmed
@@ -117,59 +112,28 @@ sequenceDiagram
 
 ---
 
-## 🧪 4. Honest & Transparent Planner Modes (`AWS_MOCK_MODE`)
-
-To ensure that hackathon evaluators, CI/CD automated test suites, and local demos can run **without incurring AWS charges or requiring active AWS credentials**, the application includes an honest and transparent multi-mode planner architecture.
+## 🧪 4. Transparent Planner Modes (`AWS_MOCK_MODE`)
 
 Every response from `plan_erp_replenishment` / `ERPPlannerAgent` includes an explicit **`planner_mode`** field:
 
-| Mode | Trigger Condition | Behavior & Guarantees |
-| :--- | :--- | :--- |
-| **`"bedrock"`** | `AWS_MOCK_MODE=False` and AWS Bedrock Converse API succeeds | Live foundation model call (`amazon.nova-micro-v1:0`) reasons over the inventory and formulates replenishment steps. |
-| **`"mock"`** | `AWS_MOCK_MODE=True` (Default) | Zero-cost deterministic multi-step simulation executing identical reasoning and tool chains without calling AWS APIs. |
-| **`"fallback"`** | `AWS_MOCK_MODE=False` but Bedrock API call fails (credentials, network, quota) | Emits a clear **`WARNING`** log with the exact exception reason, attaches `fallback_reason` to the response, and falls back gracefully to the deterministic local planner so ERP operations remain uninterrupted. |
+| Mode | Trigger Condition | Behavior & Guarantees | Web Chat Badge |
+| :--- | :--- | :--- | :---: |
+| **`"bedrock"`** | `AWS_MOCK_MODE=False` and Bedrock Converse API succeeds | Live Amazon Bedrock call reasons over the request and formulates replenishment steps. | `<span class="pill pill-confirmed">Bedrock (live)</span>` (Emerald) |
+| **`"mock"`** | `AWS_MOCK_MODE=True` (Default) | Zero-cost deterministic multi-step simulation executing identical reasoning and tool chains without calling AWS APIs. Default for automated test suites. | `<span class="pill pill-draft">Mock mode</span>` (Purple) |
+| **`"fallback"`** | `AWS_MOCK_MODE=False` but Bedrock call fails (credentials, SCP deny, quota) | Emits a clear **`WARNING`** log with the exact exception reason, attaches `fallback_reason` to the response, and falls back gracefully to deterministic planning. | `<span class="pill pill-overdue">Fallback</span>` (Amber) |
 
 ---
 
-### 🔍 Real vs. Mocked Breakdown in Default Mode
+## 🔧 5. Live Connectivity Check Command
 
-In default mode (`AWS_MOCK_MODE=True`), here is exactly what is real versus what is simulated:
+To verify your Amazon Bedrock credentials and connectivity without starting the full web server:
 
-| System Component | Execution Status | Implementation Details |
-| :--- | :---: | :--- |
-| **Amazon Bedrock Foundation Model** | **Mocked** | Simulated deterministic reasoning trace matching Bedrock execution without invoking AWS billable APIs. |
-| **ERP Inventory Database Query** | **100% REAL** | Real Django ORM query (`Item.objects.select_related("supplier").all()`) evaluating live SQLite stock levels against reorder thresholds. |
-| **Supplier Lead Time Evaluation** | **100% REAL** | Real calculation comparing supplier lead times (`supplier.lead_time_days`) from the live database. |
-| **Purchase Order Creation** | **100% REAL** | Writes actual draft Purchase Order and PO Line records to SQLite via `VoiceERPToolsService.draft_purchase_order()`. |
-| **Conversational Session Memory** | **100% REAL** | Real conversational staging in `VoiceSessionService` enabling subsequent spoken *"Confirm it"* queries. |
-| **Safety Enforcement (Ask-Then-Confirm)** | **100% REAL** | Drafts strictly remain in `'draft'` status until explicit user confirmation is received. |
-
----
-
-### Configuration in `.env`:
-```ini
-# Set to True for zero-cost local demo & pytest suites (Default)
-AWS_MOCK_MODE=True
-
-# Set to False to route calls to live Amazon Bedrock
-# AWS_MOCK_MODE=False
-
-# AWS Region & Model configuration
-AWS_REGION=us-east-1
-BEDROCK_MODEL_ID=amazon.nova-micro-v1:0
+```powershell
+python -m aws_planner.check
 ```
 
-### Transitioning to Live AWS:
-To run against real Amazon Bedrock:
-1. Set `AWS_MOCK_MODE=False` in `.env`.
-2. Configure AWS credentials via `aws configure` or environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`).
-3. The server automatically routes requests to Bedrock's Converse API. If credentials are missing or invalid, the server logs a `WARNING` and sets `planner_mode: "fallback"`.
-
----
-
-### 🎨 Web Chat UI Transparency Guarantee
-- **Badge Indicators**: The web chat UI displays a dedicated badge next to every plan result:
-  - `<span class="pill pill-confirmed">Bedrock (live)</span>` (Emerald) when live Bedrock succeeded.
-  - `<span class="pill pill-draft">Mock mode</span>` (Purple) when in default mock mode.
-  - `<span class="pill pill-overdue">Fallback</span>` (Amber) when live Bedrock failed and local planner was used (including an inline notice explaining the fallback reason).
-- **Labeling Rules**: Header subtext and Restock button labels **never display "Bedrock"** unless the active mode is verified live.
+This makes ONE lightweight Converse call (`"Say hello in one short sentence."`) and outputs:
+- **AWS Region & Model ID**
+- **Authentication Method** (Bearer token or IAM, secrets masked)
+- **Call Latency** and **Bedrock reply**
+- If an error mentions that the model requires an inference profile, it outputs the exact profile ID to set in `.env` (e.g. `BEDROCK_MODEL_ID=us.amazon.nova-micro-v1:0`).

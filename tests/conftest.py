@@ -20,6 +20,12 @@ from erp_core.models import (
 
 
 @pytest.fixture(autouse=True)
+def ensure_mock_mode_for_tests(monkeypatch):
+    """Ensure AWS_MOCK_MODE is True during tests so tests never call AWS."""
+    monkeypatch.setenv("AWS_MOCK_MODE", "True")
+
+
+@pytest.fixture(autouse=True)
 def setup_erp_data(db):
     """Seed sample ERP demo data before each test."""
     call_command("seed_demo_data")

@@ -5,6 +5,16 @@ All notable changes to the **ERP Voice Agent** project will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.12.0] - 2026-10-08
+
+### Added
+- **Live Amazon Bedrock Connectivity & Check Command**:
+  - Added `aws_planner.check` utility (`python -m aws_planner.check`) executing a lightweight Converse test call, reporting latency, model ID, region, and exact inference profile guidance on demand.
+  - Added support for `AWS_BEARER_TOKEN_BEDROCK` bearer authentication in `AWSConfig` with strict zero-logging security.
+  - Added `ensure_mock_mode_for_tests` pytest fixture ensuring test suites always default to mock mode so automated testing never invokes billable AWS APIs.
+  - Added unit tests for inference profile recommendations and connectivity check commands (85 tests passing).
+  - Updated `docs/AWS_USAGE.md` detailing live Converse execution flow, transparent planner modes, and live Bedrock badge states.
+
 ## [1.11.0] - 2026-10-08
 
 ### Documentation

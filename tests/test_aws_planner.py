@@ -209,3 +209,57 @@ def test_planner_mode_fallback_on_client_init_none(monkeypatch, caplog):
     assert result["data"]["planner_mode"] == "fallback"
     assert "fallback_reason" in result
     assert any(r.levelno == logging.WARNING for r in caplog.records)
+
+
+def test_suggest_inference_profile():
+    """Verify suggest_inference_profile returns expected cross-region profile IDs."""
+    from aws_planner.check import suggest_inference_profile
+
+    assert suggest_inference_profile("amazon.nova-micro-v1:0") == "us.amazon.nova-micro-v1:0"
+    assert suggest_inference_profile("amazon.nova-lite-v1:0") == "us.amazon.nova-lite-v1:0"
+    assert suggest_inference_profile("us.amazon.nova-micro-v1:0") == "us.amazon.nova-micro-v1:0"
+    assert "us." in suggest_inference_profile("anthropic.claude-3-5-sonnet-20241022-v2:0")
+
+
+def test_check_bedrock_command_success(monkeypatch, capsys):
+    """Verify check_bedrock returns code 0 and prints latency and reply on success."""
+    from unittest.mock import MagicMock
+    import boto3
+    from aws_planner.check import check_bedrock
+
+    mock_client = MagicMock()
+    mock_client.converse.return_value = {
+        "output": {"message": {"content": [{"text": "Hello from Bedrock!"}]}}
+    }
+    monkeypatch.setattr(boto3, "client", lambda *args, **kwargs: mock_client)
+
+    exit_code = check_bedrock()
+    assert exit_code == 0
+
+    captured = capsys.readouterr()
+    assert "SUCCESS" in captured.out
+    assert "Hello from Bedrock!" in captured.out
+    assert "Latency" in captured.out
+
+
+def test_check_bedrock_command_inference_profile_guidance(monkeypatch, capsys):
+    """Verify check_bedrock recommends exact inference profile ID on on-demand error."""
+    from unittest.mock import MagicMock
+    import boto3
+    from aws_planner.check import check_bedrock
+
+    mock_client = MagicMock()
+    mock_client.converse.side_effect = RuntimeError(
+        "Invocation of model ID amazon.nova-micro-v1:0 with on-demand throughput isn't supported. "
+        "Retry your request with the ID or ARN of an inference profile"
+    )
+    monkeypatch.setattr(boto3, "client", lambda *args, **kwargs: mock_client)
+
+    exit_code = check_bedrock()
+    assert exit_code == 1
+
+    captured = capsys.readouterr()
+    assert "FAILED" in captured.out
+    assert "us.amazon.nova-micro-v1:0" in captured.out
+    assert "BEDROCK_MODEL_ID=us.amazon.nova-micro-v1:0" in captured.out
+

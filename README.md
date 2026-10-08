@@ -7,8 +7,9 @@
 [![MCP Spec](https://img.shields.io/badge/MCP%20Spec-2025--11--25-blue.svg)](https://modelcontextprotocol.io)
 [![Django](https://img.shields.io/badge/Django-5.2-green.svg)](https://www.djangoproject.com/)
 [![AWS Bedrock](https://img.shields.io/badge/AWS-Amazon%20Bedrock-orange.svg)](docs/AWS_USAGE.md)
-[![Tests](https://img.shields.io/badge/pytest-82%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/pytest-85%20passed-brightgreen.svg)]()
 [![Package](https://img.shields.io/badge/Package-django--erp--mcp-purple.svg)](django-erp-mcp/)
+
 
 > [!NOTE]
 > **Demo & Simulation Notice**:
@@ -188,6 +189,7 @@ The server registers **26 tools** over Model Context Protocol (MCP) supporting s
 ## ⚡ AWS Builder Layer: Amazon Bedrock Planner
 
 - **Amazon Bedrock Foundation Model**: Configured with `amazon.nova-micro-v1:0` (via `BEDROCK_MODEL_ID` in `.env`) for low-latency reasoning and multi-step replenishment planning.
+- **Connectivity Check**: Run `python -m aws_planner.check` to make a live test Converse call, verify latency, and validate credentials or inference profiles.
 - **Full AWS Documentation**: See [docs/AWS_USAGE.md](docs/AWS_USAGE.md) for IAM least-privilege policies, container deployment, and architectural sequence flows.
 
 ### 🔍 Honest & Transparent Planner Modes (`AWS_MOCK_MODE`)
@@ -244,7 +246,7 @@ Run the complete test suite across all 13 test suites with pytest:
 python -m pytest -v
 ```
 
-All **82 tests** validate:
+All **85 tests** validate:
 - **Models**: `Customer`, `Supplier`, `Item`, `Invoice`, `PurchaseOrder`, `PurchaseOrderLine`, `Employee`, `LeaveRequest` (`tests/test_models.py`: **7 tests**)
 - **Data Seeding**: Realistic Indian demo data counts & idempotency (`tests/test_seed_command.py`: **2 tests**)
 - **Invoices**: Unpaid counts/totals, customer filtering, details, creation, validation, marking paid (`tests/test_invoices.py`: **6 tests**)
@@ -255,10 +257,10 @@ All **82 tests** validate:
 - **Voice MCP Tools**: Speech-friendly responses for pending invoices, overdue invoices, low stock items, pending leaves, sales summaries, and PO status (`tests/test_voice_mcp_tools.py`: **7 tests**)
 - **Voice Briefing & Async Domain Tools**: Executive morning briefing service and async MCP domain tools (`tests/test_voice_tools.py`: **3 tests**)
 - **Action Confirmation & Safety**: Draft-only creation, explicit confirmation, polite failure without draft, leave confirmation, session isolation (`tests/test_action_confirmation.py`: **8 tests**)
-- **AWS Bedrock Planner**: Environment config, fastest supplier optimization, multi-step plan generation, confirm-it flow, and all 3 planner modes (mock, bedrock live, fallback error handling) (`tests/test_aws_planner.py`: **8 tests**)
+- **AWS Bedrock Planner**: Environment config, fastest supplier optimization, multi-step plan generation, confirm-it flow, connectivity check command, and all 3 planner modes (mock, bedrock live, fallback error handling) (`tests/test_aws_planner.py`: **11 tests**)
 - **Web Chat Simulator**: HTML page serving, browser root routing, voice API endpoints, direct tool execution, transparent mode labels, explicit intent routing & polite fallback (`tests/test_web_chat.py`: **18 tests**)
 - **Standalone Package (`django-erp-mcp`)**: Model serialization, querying, tool registration, `@mcp_model` decorator (`django-erp-mcp/tests/test_adapter.py`: **4 tests**)
-- **Total**: **82 passed in ~13 seconds** (7 + 2 + 6 + 5 + 4 + 5 + 5 + 7 + 3 + 8 + 8 + 18 + 4 = 82).
+- **Total**: **85 passed in ~12 seconds** (7 + 2 + 6 + 5 + 4 + 5 + 5 + 7 + 3 + 8 + 11 + 18 + 4 = 85).
 
 ---
 
