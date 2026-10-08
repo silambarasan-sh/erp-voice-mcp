@@ -120,3 +120,91 @@ def test_chat_page_labels_honest_in_mock_mode(web_client):
     btn_text = btn_match.group(1).strip()
     assert "Restock Fastest Supplier" in btn_text
     assert "Bedrock" not in btn_text
+
+
+@pytest.mark.django_db(transaction=True)
+def test_chat_api_routing_greeting(web_client):
+    """Verify greeting inputs return short hello and exactly 3 example questions."""
+    for phrase in ["Hello", "vanakkam", "hi", "hey there"]:
+        response = web_client.post("/api/chat", json={"message": phrase, "session_id": "test_greeting"})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["tool"] == "greeting"
+        assert "hello" in data["speech"].lower()
+        assert len(data["data"]["examples"]) == 3
+        assert "pending invoices" in data["speech"].lower()
+        assert "low stock" in data["speech"].lower()
+        assert "restock" in data["speech"].lower()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_chat_api_routing_thanks(web_client):
+    """Verify thanks/closing inputs return polite closing with no data."""
+    for phrase in ["thank you", "thanks", "ok", "okay", "bye"]:
+        response = web_client.post("/api/chat", json={"message": phrase, "session_id": "test_thanks"})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["tool"] == "thanks"
+        assert len(data["speech"]) > 0
+        assert not data["data"]  # Empty dict / no data
+
+
+@pytest.mark.django_db(transaction=True)
+def test_chat_api_routing_gibberish_fallback(web_client):
+    """Verify gibberish input does NOT return daily briefing but polite fallback with capabilities and 2 examples."""
+    response = web_client.post("/api/chat", json={"message": "asdf", "session_id": "test_gibberish"})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["tool"] == "unrecognized"
+    assert data["tool"] != "voice_daily_erp_briefing"
+    assert "briefing" not in data["tool"]
+    # Check capabilities mentioned in fallback
+    speech_lower = data["speech"].lower()
+    for cap in ["invoices", "stock", "leaves", "restock", "top customers"]:
+        assert cap in speech_lower
+    assert len(data["data"]["examples"]) == 2
+
+
+@pytest.mark.django_db(transaction=True)
+def test_chat_api_routing_off_topic_fallback(web_client):
+    """Verify off-topic questions route to unrecognized fallback, NEVER to daily briefing."""
+    response = web_client.post("/api/chat", json={"message": "what is the weather", "session_id": "test_weather"})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["tool"] == "unrecognized"
+    assert data["tool"] != "voice_daily_erp_briefing"
+    assert "briefing" not in data["tool"]
+    assert "invoices" in data["speech"].lower()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_chat_api_routing_help(web_client):
+    """Verify 'what can you do' routes to help intent."""
+    response = web_client.post("/api/chat", json={"message": "what can you do", "session_id": "test_help"})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["tool"] == "help"
+    assert "capabilities" in data["data"]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_chat_api_routing_daily_briefing_explicit_only(web_client):
+    """Verify daily briefing is ONLY returned when explicit briefing/overview/summary is requested."""
+    for phrase in ["give me the daily briefing", "system overview", "executive summary", "status"]:
+        response = web_client.post("/api/chat", json={"message": phrase, "session_id": "test_briefing"})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["tool"] == "voice_daily_erp_briefing"
+        assert "speech" in data
+        assert "data" in data
+
+
+@pytest.mark.django_db(transaction=True)
+def test_chat_api_routing_low_stock_items(web_client):
+    """Verify low stock queries continue routing to get_low_stock_items."""
+    response = web_client.post("/api/chat", json={"message": "check low stock items", "session_id": "test_low_stock"})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["tool"] == "get_low_stock_items"
+    assert "items" in data["data"]
+

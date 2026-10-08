@@ -5,6 +5,20 @@ All notable changes to the **ERP Voice Agent** project will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-10-08
+
+### Fixed
+- **Chat Intent Routing & Fallback Handling**:
+  - Replaced indiscriminate default return of the daily ERP briefing on unrecognized input with a polite capabilities fallback.
+  - Added explicit conversational intents:
+    - `greeting`: Handles greetings (`hello`, `hi`, `hey`, `vanakkam`) with a welcoming message and 3 concrete example questions.
+    - `thanks`: Handles closing remarks (`thanks`, `thank you`, `ok`, `okay`, `bye`) with a polite acknowledgment and no payload data.
+    - `help`: Explains assistant capabilities and offers sample queries.
+    - `daily_briefing`: Exclusively triggered when the user explicitly requests a briefing, summary, overview, or status.
+  - Added structured fallback for unrecognized/gibberish/off-topic inputs listing supported operations (invoices, stock, leaves, restock, top customers) with 2 sample queries.
+  - Preserved all existing ERP domain tool intents, `planner_mode` transparency badges, and honesty labels.
+  - Added 7 dedicated pytest tests in `tests/test_web_chat.py`.
+
 ## [1.6.0] - 2026-10-08
 
 ### Added

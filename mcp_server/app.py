@@ -1,4 +1,5 @@
 import os
+import re
 from typing import Callable
 import django
 from asgiref.sync import sync_to_async
@@ -129,13 +130,79 @@ async def chat_api(request: Request) -> JSONResponse:
         tool_name = "draft_purchase_order"
         response_payload = await sync_to_async(VoiceERPToolsService.draft_purchase_order)(session_id=session_id)
 
-    else:
-        # Fallback to daily executive briefing
+    elif any(k in lower for k in ["briefing", "daily briefing", "summary", "overview", "status"]):
+        # Explicit daily executive briefing request
         tool_name = "voice_daily_erp_briefing"
         briefing = await sync_to_async(VoiceBriefingService.get_daily_briefing)()
         response_payload = {
             "speech": briefing.get("voice_summary", "Here is your ERP briefing."),
             "data": briefing,
+        }
+
+    elif any(k in lower for k in ["what can you do", "help", "how can you help", "what do you do", "commands"]):
+        tool_name = "help"
+        speech = (
+            "I can help you monitor and run your business operations. "
+            "You can ask me to check pending or overdue invoices, review low stock inventory, "
+            "check leave requests, restock items from the fastest supplier, or find your top customers. "
+            "For example: 'What are my pending invoices?' or 'Restock everything that's running low'."
+        )
+        response_payload = {
+            "speech": speech,
+            "data": {
+                "intent": "help",
+                "capabilities": ["invoices", "stock", "leaves", "restock", "top customers"],
+                "examples": ["What are my pending invoices?", "Restock everything that's running low"],
+            },
+        }
+
+    elif bool(re.search(r"\b(hello|hi|hey|vanakkam)\b", lower)):
+        tool_name = "greeting"
+        speech = (
+            "Hello! I am your Alexa+ ERP Voice Assistant. "
+            "Here are three questions you can ask me: "
+            "1. 'What are my pending invoices?' "
+            "2. 'Show me low stock items.' "
+            "3. 'Restock everything that's running low from the fastest supplier.'"
+        )
+        response_payload = {
+            "speech": speech,
+            "data": {
+                "intent": "greeting",
+                "examples": [
+                    "What are my pending invoices?",
+                    "Show me low stock items",
+                    "Restock everything that's running low from the fastest supplier",
+                ],
+            },
+        }
+
+    elif bool(re.search(r"\b(thanks|thank you|thank u|ok|okay|bye|goodbye)\b", lower)):
+        tool_name = "thanks"
+        speech = "You're welcome! Let me know whenever you need anything else."
+        response_payload = {
+            "speech": speech,
+            "data": {},
+        }
+
+    else:
+        # Polite fallback message - never default to the daily briefing
+        tool_name = "unrecognized"
+        speech = (
+            "I'm not sure how to help with that. I can help you with invoices, "
+            "stock, leaves, restock, and top customers. For example, you can ask: "
+            "'What are my pending invoices?' or 'Show low stock items'."
+        )
+        response_payload = {
+            "speech": speech,
+            "data": {
+                "intent": "unrecognized",
+                "capabilities": ["invoices", "stock", "leaves", "restock", "top customers"],
+                "examples": [
+                    "What are my pending invoices?",
+                    "Show low stock items",
+                ],
+            },
         }
 
     res_body = {
