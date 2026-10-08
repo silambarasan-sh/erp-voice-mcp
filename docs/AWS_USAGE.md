@@ -6,7 +6,7 @@
 
 ## 🏗️ 1. Architecture Overview
 
-The **ERP Voice Agent** integrates **Amazon Bedrock** and the **AWS Strands Agents SDK** with an enterprise Model Context Protocol (MCP) server over Streamable HTTP, enabling **Alexa+** and executive voice assistants to reason across ERP supply chain operations safely.
+The **ERP Voice Agent** integrates **Amazon Bedrock** Foundation Models with an enterprise Model Context Protocol (MCP) server over Streamable HTTP, enabling **Alexa+** and executive voice assistants to reason across ERP supply chain operations safely.
 
 ```text
                                ┌──────────────────────────────────────────────────┐
@@ -24,7 +24,7 @@ The **ERP Voice Agent** integrates **Amazon Bedrock** and the **AWS Strands Agen
                                     ▼                                         ▼
                      ┌─────────────────────────────┐           ┌─────────────────────────────┐
                      │   Standard Voice MCP Tools  │           │   AWS Builder Layer:        │
-                     │  - Invoices, Stock, Leaves  │           │   Amazon Bedrock & Strands  │
+                     │  - Invoices, Stock, Leaves  │           │   Amazon Bedrock            │
                      │  - Ask-Then-Confirm Actions │           │   ERP Planner Agent         │
                      └──────────────┬──────────────┘           └──────────────┬──────────────┘
                                     │                                         │
@@ -45,30 +45,22 @@ The **ERP Voice Agent** integrates **Amazon Bedrock** and the **AWS Strands Agen
 
 ### 1. Amazon Bedrock
 - **Role**: Foundation Model Orchestration & Natural Language Reasoning Engine.
-- **Models Utilized**:
-  - `amazon.nova-micro-v1:0` (Fast, cost-efficient Amazon Nova model for real-time voice latency)
-  - `anthropic.claude-3-5-sonnet-20241022-v2:0` (Advanced multi-step reasoning and supplier optimization)
+- **Model Utilized**:
+  - `amazon.nova-micro-v1:0` (Fast, cost-efficient Amazon Nova model for real-time voice latency and multi-step reasoning, configurable via `BEDROCK_MODEL_ID` in `.env`)
 - **Why Bedrock**:
   1. **Serverless Generative AI**: Zero GPU provisioning or infrastructure management.
   2. **Low-Latency Converse API**: Delivers the near-instantaneous responses essential for natural Alexa+ voice interactions.
   3. **Enterprise Data Privacy**: Ensures proprietary business ERP data (invoices, client records, purchase orders) is never used for foundation model training.
   4. **Native Tool Use**: Seamlessly invokes Python functions as tools to inspect stock levels, compare supplier lead times, and generate purchase orders.
 
-### 2. AWS Strands Agents SDK (`strands-agents`)
-- **Role**: Official AWS Multi-Agent Framework and Tool Orchestration Layer.
-- **Why Strands Agents SDK**:
-  1. **First-Class Bedrock Integration**: Built natively around `BedrockModel` with automatic schema generation for Python functions.
-  2. **Multi-Step Goal Decomposition**: Transforms vague executive directives (e.g., *"Restock everything running low from the fastest supplier"*) into structured, verifiable execution sequences.
-  3. **Safety & Confirmation Enforcement**: Embeds the critical ERP safety constraint that draft orders are staged in session memory and **never committed to the database without explicit user confirmation**.
-
-### 3. AWS App Runner / Amazon ECS (Container Hosting)
+### 2. AWS App Runner / Amazon ECS (Container Hosting)
 - **Role**: Scalable, fully-managed hosting for the Model Context Protocol (MCP) server.
 - **Why App Runner / ECS**:
   1. Direct support for streaming ASGI HTTP servers (`Streamable HTTP` on `/mcp`).
   2. Automatic horizontal scaling in response to concurrent voice queries.
   3. Seamless integration with AWS VPC, AWS Secrets Manager, and IAM Roles.
 
-### 4. AWS Identity and Access Management (IAM)
+### 3. AWS Identity and Access Management (IAM)
 - **Role**: Least-Privilege Role-Based Access Control (RBAC).
 - **Policy Definition**:
   ```json
@@ -82,8 +74,7 @@ The **ERP Voice Agent** integrates **Amazon Bedrock** and the **AWS Strands Agen
           "bedrock:Converse"
         ],
         "Resource": [
-          "arn:aws:bedrock:*::foundation-model/amazon.nova-micro-v1:0",
-          "arn:aws:bedrock:*::foundation-model/anthropic.claude-3-5-sonnet-20241022-v2:0"
+          "arn:aws:bedrock:*::foundation-model/amazon.nova-micro-v1:0"
         ]
       }
     ]
@@ -105,23 +96,23 @@ sequenceDiagram
     autonumber
     actor User as Executive (Alexa+)
     participant MCP as MCP Server (/mcp)
-    participant Bedrock as Amazon Bedrock / Strands
+    participant Bedrock as Amazon Bedrock
     participant ERP as ERP Database (Django)
     participant Session as VoiceSessionService
 
     User->>MCP: "Restock everything that's running low from the fastest supplier"
     MCP->>Bedrock: ERPPlannerAgent.plan_and_execute(prompt)
     Bedrock->>ERP: tool_get_low_stock_items()
-    ERP-->>Bedrock: Returns 7 low-stock items with supplier details
-    Note over Bedrock: Evaluates supplier lead times.<br/>Identifies fastest supplier: Reliance (3 days).
+    ERP-->>Bedrock: Returns 6 low-stock items with supplier details
+    Note over Bedrock: Evaluates supplier lead times.<br/>Identifies fastest supplier: Reliance (4 days).
     Bedrock->>ERP: tool_draft_purchase_order(item_skus, status="draft")
-    ERP-->>Bedrock: Creates DRAFT PO (ID: DRAFT-PO-11)
-    Bedrock->>Session: Stages DRAFT-PO-11 for confirmation
+    ERP-->>Bedrock: Creates DRAFT PO (ID: DRAFT-PO-4)
+    Bedrock->>Session: Stages DRAFT-PO-4 for confirmation
     Bedrock-->>MCP: Voice summary + structured plan data
-    MCP-->>User: "Reliance is the fastest supplier (3-day lead time). I drafted order DRAFT-PO-11. Would you like me to confirm it?"
+    MCP-->>User: "Reliance Industrial Polymers is the fastest supplier (4-day lead time). I drafted order DRAFT-PO-4 for 2 items. Would you like me to confirm it?"
     User->>MCP: "Confirm it"
     MCP->>ERP: confirm_action() -> changes status to confirmed
-    ERP-->>User: "Purchase order DRAFT-PO-11 has been confirmed."
+    ERP-->>User: "Purchase order DRAFT-PO-4 for Reliance Industrial Polymers has been confirmed."
 ```
 
 ---
@@ -134,7 +125,7 @@ Every response from `plan_erp_replenishment` / `ERPPlannerAgent` includes an exp
 
 | Mode | Trigger Condition | Behavior & Guarantees |
 | :--- | :--- | :--- |
-| **`"bedrock"`** | `AWS_MOCK_MODE=False` and AWS Bedrock Converse API succeeds | Live foundation model call (`amazon.nova-micro-v1:0` or Claude 3.5 Sonnet) reasons over the inventory and formulates replenishment steps. |
+| **`"bedrock"`** | `AWS_MOCK_MODE=False` and AWS Bedrock Converse API succeeds | Live foundation model call (`amazon.nova-micro-v1:0`) reasons over the inventory and formulates replenishment steps. |
 | **`"mock"`** | `AWS_MOCK_MODE=True` (Default) | Zero-cost deterministic multi-step simulation executing identical reasoning and tool chains without calling AWS APIs. |
 | **`"fallback"`** | `AWS_MOCK_MODE=False` but Bedrock API call fails (credentials, network, quota) | Emits a clear **`WARNING`** log with the exact exception reason, attaches `fallback_reason` to the response, and falls back gracefully to the deterministic local planner so ERP operations remain uninterrupted. |
 

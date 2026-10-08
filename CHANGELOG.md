@@ -5,6 +5,17 @@ All notable changes to the **ERP Voice Agent** project will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.11.0] - 2026-10-08
+
+### Documentation
+- **README & Documentation Accuracy Corrections**:
+  - Updated hackathon demo script table with real outputs generated against freshly seeded data (exact invoice count, customer names, item names, employee names, and draft PO ID `DRAFT-PO-4`).
+  - Corrected MCP tools documentation to enumerate all 26 registered tools (8 query/context, 6 action/planning, 12 domain management).
+  - Pruned unverified claims: removed "tested on macOS and Linux" (retained verified Windows Python 3.14.6 / 3.12+ compatibility), removed unused AWS Strands SDK references from README and `docs/AWS_USAGE.md`, and focused Bedrock documentation on configured `amazon.nova-micro-v1:0`.
+  - Fixed test suite breakdown to sum precisely to the 82 passing tests across all 13 suites.
+  - Updated MCP Inspector instructions with verified steps for Streamable HTTP (`http://127.0.0.1:8000/mcp`) and added PowerShell execution policy bypass tip.
+  - Added clear notice near the top disclosing that Alexa+ is simulated via the Web Chat interface and that the Amazon Bedrock replenishment planner runs in mock mode by default (`AWS_MOCK_MODE=True`).
+
 ## [1.10.0] - 2026-10-08
 
 ### Fixed
