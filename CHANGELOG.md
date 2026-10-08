@@ -5,6 +5,14 @@ All notable changes to the **ERP Voice Agent** project will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.0] - 2026-10-08
+
+### Changed
+- **Speech Summaries Point to On-Screen List**:
+  - Updated list-type voice tools (`get_low_stock_items`, `get_pending_invoices`, `get_pending_leaves`, `get_overdue_invoices`) to conclude speech summaries with `"The full list is on your screen."`.
+  - Preserved count and top 2 item spoken details while guiding voice/Alexa+ users to visual cards on screen.
+  - Updated test assertions across `tests/test_voice_mcp_tools.py` and `tests/test_web_chat.py`.
+
 ## [1.8.0] - 2026-10-08
 
 ### Fixed

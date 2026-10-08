@@ -578,10 +578,10 @@ class VoiceERPToolsService:
         if count == 0:
             speech = f"You have no pending invoices{month_label}."
         else:
-            names_str = ", ".join(name for name, _ in sorted_customers)
+            top_2_names = ", ".join(name for name, _ in sorted_customers[:2])
             speech = (
                 f"You have {count} pending invoices{month_label} totaling {total_amount:,.2f} rupees. "
-                f"Top customers are {names_str}."
+                f"Top customers are {top_2_names}. The full list is on your screen."
             )
 
         return {
@@ -637,11 +637,14 @@ class VoiceERPToolsService:
         if count == 0:
             speech = "Great news, there are no overdue invoices."
         else:
-            top_overdue = overdue_list[0]
+            top_2_overdue = overdue_list[:2]
+            top_2_desc = ", and ".join(
+                f"{inv['invoice_no']} for {inv['customer']} ({inv['days_overdue']} days overdue)"
+                for inv in top_2_overdue
+            )
             speech = (
-                f"You have {count} overdue invoices totaling {total_amount:,.2f} rupees. "
-                f"The most overdue is {top_overdue['invoice_no']} for {top_overdue['customer']}, "
-                f"{top_overdue['days_overdue']} days overdue."
+                f"You have {count} overdue invoices totaling {total_amount:,.2f} rupees, "
+                f"including {top_2_desc}. The full list is on your screen."
             )
 
         return {
@@ -679,7 +682,7 @@ class VoiceERPToolsService:
             sample_names = ", ".join(i.name for i in low_items[:2])
             speech = (
                 f"There are {count} items below reorder level, including {sample_names}. "
-                "Restocking is recommended."
+                "The full list is on your screen."
             )
 
         return {
@@ -714,13 +717,14 @@ class VoiceERPToolsService:
             req = leaves_data[0]
             speech = (
                 f"There is 1 pending leave request from {req['employee']} in {req['department']} "
-                f"from {req['from_date']} to {req['to_date']}."
+                f"from {req['from_date']} to {req['to_date']}. The full list is on your screen."
             )
         else:
             first_two = [f"{r['employee']} from {r['from_date']}" for r in leaves_data[:2]]
             names_summary = ", and ".join(first_two)
             speech = (
-                f"You have {count} pending leave requests, including {names_summary}."
+                f"You have {count} pending leave requests, including {names_summary}. "
+                "The full list is on your screen."
             )
 
         return {

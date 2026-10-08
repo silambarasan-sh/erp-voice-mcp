@@ -28,6 +28,7 @@ async def test_get_pending_invoices_tool_without_month():
     speech = res["speech"]
     assert "pending invoices" in speech.lower()
     assert "rupees" in speech.lower()
+    assert "the full list is on your screen" in speech.lower()
 
 
 @pytest.mark.django_db(transaction=True)
@@ -38,11 +39,13 @@ async def test_get_pending_invoices_tool_with_month():
     res_oct = await get_pending_invoices(month="October")
     assert "speech" in res_oct
     assert "October" in res_oct["speech"] or "pending" in res_oct["speech"]
+    assert "the full list is on your screen" in res_oct["speech"].lower()
 
     # Test with numeric month string
     res_num = await get_pending_invoices(month="10")
     assert "speech" in res_num
     assert res_num["data"]["month_filter"] == "10"
+    assert "the full list is on your screen" in res_num["speech"].lower()
 
 
 @pytest.mark.django_db(transaction=True)
@@ -65,6 +68,7 @@ async def test_get_overdue_invoices_tool():
     speech = res["speech"]
     assert "overdue" in speech.lower()
     assert "rupees" in speech.lower()
+    assert "the full list is on your screen" in speech.lower()
 
 
 @pytest.mark.django_db(transaction=True)
@@ -84,6 +88,7 @@ async def test_get_low_stock_items_tool():
 
     speech = res["speech"]
     assert "below reorder level" in speech.lower()
+    assert "the full list is on your screen" in speech.lower()
 
 
 @pytest.mark.django_db(transaction=True)
@@ -106,6 +111,7 @@ async def test_get_pending_leaves_tool():
 
     speech = res["speech"]
     assert "8 pending leave requests" in speech or "pending leave requests" in speech
+    assert "the full list is on your screen" in speech.lower()
 
 
 @pytest.mark.django_db(transaction=True)

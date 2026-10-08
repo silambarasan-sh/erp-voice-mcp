@@ -66,6 +66,7 @@ def test_chat_api_routing_pending_invoices(web_client):
     data = response.json()
     assert data["tool"] == "get_pending_invoices"
     assert "pending invoices" in data["speech"].lower()
+    assert "the full list is on your screen" in data["speech"].lower()
     assert data["data"]["count"] > 0
     assert "invoices" in data["data"]
 
@@ -284,6 +285,7 @@ def test_chat_api_routing_low_stock_items(web_client):
     assert response.status_code == 200
     data = response.json()
     assert data["tool"] == "get_low_stock_items"
+    assert "the full list is on your screen" in data["speech"].lower()
     assert "items" in data["data"]
 
 
