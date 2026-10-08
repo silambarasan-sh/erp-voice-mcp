@@ -5,21 +5,32 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![MCP Spec](https://img.shields.io/badge/MCP%20Spec-2025--11--25-blue.svg)](https://modelcontextprotocol.io)
 [![Django](https://img.shields.io/badge/Django-5.2-green.svg)](https://www.djangoproject.com/)
-[![Tests](https://img.shields.io/badge/pytest-43%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/pytest-51%20passed-brightgreen.svg)]()
 
 ---
 
-## 🎙️ Alexa+ Voice MCP Tools
+## 🎙️ Alexa+ Voice & Action MCP Tools
 
-The server registers 5 primary voice tools on the official Python MCP SDK over Streamable HTTP. Each tool returns a **concise, speech-friendly summary** formatted for voice synthesis (Alexa+), along with a **structured data** object:
+The server exposes voice query tools, context follow-ups, and safe action tools featuring an **Ask-Then-Confirm pattern** (the system **never alters data without user confirmation**):
 
-| Tool | Parameters | Description / Return |
+### 1. Information Query & Context Follow-Up Tools
+| Tool | Parameters | Spoken Output / Function |
 | :--- | :--- | :--- |
-| `get_pending_invoices` | `month` *(optional, int 1-12)* | Spoken summary with count, total pending INR amount, and top 3 pending customers. |
-| `get_overdue_invoices` | *None* | Spoken summary with count, total overdue amount, and list of customers with days overdue. |
-| `get_low_stock_items` | *None* | Spoken summary of inventory items below reorder level, including item name, current stock, and threshold. |
-| `get_pending_leaves` | *None* | Spoken summary of pending employee leave requests with employee names, departments, and date ranges. |
-| `get_sales_summary` | `period` *(`today` \| `week` \| `month`, default: `month`)* | Spoken summary of paid invoices, total revenue in INR, and average transaction size for the period. |
+| `get_pending_invoices` | `month` *(optional)*, `session_id` | Spoken summary with count, total pending INR amount, and top 3 customers. Stores context in session state. |
+| `get_overdue_invoices` | `session_id` | Spoken summary with count, overdue amount, and customers sorted by days overdue. |
+| `get_low_stock_items` | *None* | Spoken summary of inventory items below reorder level requiring supplier replenishment. |
+| `get_pending_leaves` | *None* | Spoken summary of pending employee leave requests with employee names and dates. |
+| `get_sales_summary` | `period` *(`today` \| `week` \| `month`)*, `session_id` | Spoken summary of sales, paid invoices, and revenue collected. |
+| `get_top_customers` | `session_id` | Context follow-up for *"and who are the top 3 customers for that?"* using conversational session memory. |
+
+### 2. Action Tools with Confirmation Step
+| Tool | Parameters | Ask-Then-Confirm Workflow |
+| :--- | :--- | :--- |
+| `draft_purchase_order` | `item_skus` *(optional)*, `session_id` | Auto-picks low stock items, groups by supplier, creates **DRAFT** POs in SQLite, and returns a summary + `draft_id`. Status remains `draft`. |
+| `confirm_purchase_order`| `draft_id` *(optional)*, `session_id` | Transitions draft PO status to **`confirmed`**. If `draft_id` is omitted, uses the active draft from session state. Fails politely if no draft exists. |
+| `approve_leave` | `employee_name`, `confirm` *(bool)*, `session_id` | When `confirm=False`, checks request and asks user for confirmation without altering database status. When `confirm=True`, marks status `approved`. |
+| `reject_leave` | `employee_name`, `reason`, `confirm` *(bool)*, `session_id` | When `confirm=False`, asks for confirmation. When `confirm=True`, records reason and marks status `rejected`. |
+| `confirm_action` | `session_id` | Universal voice handler for conversational *"confirm it"* queries. Executes whichever staged action is pending in the session. |
 
 ### Voice Response Structure:
 ```json
@@ -192,12 +203,14 @@ Run the complete test suite with pytest:
 python -m pytest -v
 ```
 
-All **43 tests** validate:
+All **51 tests** validate:
 - Models: Customer, Supplier, Item, Invoice, PurchaseOrder, PurchaseOrderLine, Employee, LeaveRequest
 - Management command: `seed_demo_data` (counts, data integrity, idempotency)
 - Domain services: Invoices, Inventory, POs, HR Leave
 - 5 Voice-optimized MCP tools (`get_pending_invoices`, `get_overdue_invoices`, `get_low_stock_items`, `get_pending_leaves`, `get_sales_summary`)
-- Speech + structured data response contract
+- Action confirmation workflow: draft PO creation, explicit confirmation, polite failure without draft
+- Leave approval and rejection ask-then-confirm patterns
+- Conversational session state memory and follow-up tools (`get_top_customers`, `confirm_action`)
 - MCP protocol spec `2025-11-25` and Streamable HTTP endpoints
 
 ---

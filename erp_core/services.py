@@ -445,8 +445,70 @@ class VoiceBriefingService:
         }
 
 
+class VoiceSessionService:
+    """Manages conversational session state and pending confirmations for voice agents."""
+
+    _sessions: Dict[str, Dict[str, Any]] = {}
+
+    @classmethod
+    def get_session(cls, session_id: str = "default") -> Dict[str, Any]:
+        """Retrieve session state dict by session_id."""
+        sid = session_id or "default"
+        if sid not in cls._sessions:
+            cls._sessions[sid] = {
+                "last_context": None,
+                "context_data": {},
+                "last_draft_id": None,
+                "last_draft_po_ids": [],
+                "pending_action": None,
+            }
+        return cls._sessions[sid]
+
+    @classmethod
+    def set_context(
+        cls,
+        session_id: str = "default",
+        context_type: str = "",
+        data: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Store context type and relevant query data in the session."""
+        s = cls.get_session(session_id)
+        s["last_context"] = context_type
+        if data:
+            s["context_data"] = data
+
+    @classmethod
+    def set_pending_action(
+        cls,
+        session_id: str = "default",
+        action_data: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Store a staged action awaiting explicit user confirmation."""
+        s = cls.get_session(session_id)
+        s["pending_action"] = action_data
+
+    @classmethod
+    def get_pending_action(cls, session_id: str = "default") -> Optional[Dict[str, Any]]:
+        """Retrieve the currently pending action awaiting confirmation."""
+        return cls.get_session(session_id).get("pending_action")
+
+    @classmethod
+    def clear_pending_action(cls, session_id: str = "default") -> None:
+        """Clear any pending action from the session."""
+        s = cls.get_session(session_id)
+        s["pending_action"] = None
+
+    @classmethod
+    def reset(cls, session_id: Optional[str] = None) -> None:
+        """Reset session data. If session_id is None, clears all sessions."""
+        if session_id:
+            cls._sessions.pop(session_id, None)
+        else:
+            cls._sessions.clear()
+
+
 class VoiceERPToolsService:
-    """Service implementing the 5 core Alexa+ ERP voice tools with speech-friendly responses."""
+    """Service implementing core Alexa+ ERP voice tools with speech-friendly responses and session state."""
 
     MONTH_MAP = {
         "january": 1, "jan": 1, "1": 1, "01": 1,
@@ -464,10 +526,10 @@ class VoiceERPToolsService:
     }
 
     @classmethod
-    def get_pending_invoices(cls, month: Optional[str] = None) -> Dict[str, Any]:
+    def get_pending_invoices(cls, month: Optional[str] = None, session_id: str = "default") -> Dict[str, Any]:
         """Return pending invoices with count, total amount, and top 3 customers.
 
-        Optionally filtered by month name or number.
+        Optionally filtered by month name or number. Saves context to session state.
         """
         qs = Invoice.objects.filter(status="pending").select_related("customer")
         month_label = ""
@@ -476,7 +538,6 @@ class VoiceERPToolsService:
             cleaned = month.strip().lower()
             month_num = None
             if "-" in cleaned:
-                # e.g. "2026-10"
                 parts = cleaned.split("-")
                 try:
                     month_num = int(parts[1])
@@ -502,6 +563,18 @@ class VoiceERPToolsService:
         sorted_customers = sorted(cust_totals.items(), key=lambda x: x[1], reverse=True)[:3]
         top_3 = [{"customer": name, "amount": float(amt)} for name, amt in sorted_customers]
 
+        # Update session state for context follow-up
+        VoiceSessionService.set_context(
+            session_id=session_id,
+            context_type="pending_invoices",
+            data={
+                "month": month,
+                "count": count,
+                "total_amount": float(total_amount),
+                "top_customers": top_3,
+            },
+        )
+
         if count == 0:
             speech = f"You have no pending invoices{month_label}."
         else:
@@ -522,8 +595,8 @@ class VoiceERPToolsService:
             },
         }
 
-    @staticmethod
-    def get_overdue_invoices() -> Dict[str, Any]:
+    @classmethod
+    def get_overdue_invoices(cls, session_id: str = "default") -> Dict[str, Any]:
         """Return overdue invoices with customer name and number of days overdue."""
         today = timezone.now().date()
         qs = Invoice.objects.filter(status="overdue").select_related("customer").order_by("due_date")
@@ -532,9 +605,13 @@ class VoiceERPToolsService:
 
         overdue_list = []
         total_amount = Decimal("0.00")
+        cust_totals: Dict[str, Decimal] = {}
+
         for inv in invoices:
             days = max(0, (today - inv.due_date).days)
             total_amount += inv.amount
+            name = inv.customer.name
+            cust_totals[name] = cust_totals.get(name, Decimal("0.00")) + inv.amount
             overdue_list.append({
                 "invoice_no": inv.invoice_no,
                 "customer": inv.customer.name,
@@ -543,8 +620,19 @@ class VoiceERPToolsService:
                 "days_overdue": days,
             })
 
-        # Sort by days_overdue descending
         overdue_list.sort(key=lambda x: x["days_overdue"], reverse=True)
+        sorted_customers = sorted(cust_totals.items(), key=lambda x: x[1], reverse=True)[:3]
+        top_3 = [{"customer": name, "amount": float(amt)} for name, amt in sorted_customers]
+
+        VoiceSessionService.set_context(
+            session_id=session_id,
+            context_type="overdue_invoices",
+            data={
+                "count": count,
+                "total_amount": float(total_amount),
+                "top_customers": top_3,
+            },
+        )
 
         if count == 0:
             speech = "Great news, there are no overdue invoices."
@@ -570,7 +658,6 @@ class VoiceERPToolsService:
         """Return inventory items currently below reorder level requiring restocking."""
         all_items = Item.objects.select_related("supplier").all()
         low_items = [i for i in all_items if i.is_below_reorder_level]
-        # Sort by most depleted relative to reorder level
         low_items.sort(key=lambda x: x.stock_qty)
         count = len(low_items)
 
@@ -644,8 +731,8 @@ class VoiceERPToolsService:
             },
         }
 
-    @staticmethod
-    def get_sales_summary(period: str = "month") -> Dict[str, Any]:
+    @classmethod
+    def get_sales_summary(cls, period: str = "month", session_id: str = "default") -> Dict[str, Any]:
         """Return total sales revenue and invoice counts for today, this week, or this month."""
         cleaned = period.strip().lower()
         today = timezone.now().date()
@@ -656,13 +743,12 @@ class VoiceERPToolsService:
         elif cleaned == "week":
             start_date = today - timedelta(days=7)
             period_label = "this week"
-        else:  # default to month
+        else:
             start_date = today - timedelta(days=30)
             period_label = "this month"
             cleaned = "month"
 
-        # Filter invoices created in or applicable to the period
-        qs = Invoice.objects.filter(created_at__date__gte=start_date)
+        qs = Invoice.objects.filter(created_at__date__gte=start_date).select_related("customer")
         invoices = list(qs)
 
         total_invoiced = sum((inv.amount for inv in invoices), Decimal("0.00"))
@@ -677,6 +763,25 @@ class VoiceERPToolsService:
 
         overdue_invoices = [inv for inv in invoices if inv.status == "overdue"]
         overdue_amount = sum((inv.amount for inv in overdue_invoices), Decimal("0.00"))
+
+        # Compute top customers for the sales period
+        cust_sales: Dict[str, Decimal] = {}
+        target_invoices = paid_invoices if paid_invoices else invoices
+        for inv in target_invoices:
+            name = inv.customer.name
+            cust_sales[name] = cust_sales.get(name, Decimal("0.00")) + inv.amount
+        sorted_sales = sorted(cust_sales.items(), key=lambda x: x[1], reverse=True)[:3]
+        sales_top_3 = [{"customer": name, "amount": float(amt)} for name, amt in sorted_sales]
+
+        VoiceSessionService.set_context(
+            session_id=session_id,
+            context_type="sales_summary",
+            data={
+                "period": cleaned,
+                "period_label": period_label,
+                "top_customers": sales_top_3,
+            },
+        )
 
         speech = (
             f"Sales summary for {period_label}: {total_count} invoices created totaling {total_invoiced:,.2f} rupees, "
@@ -698,5 +803,428 @@ class VoiceERPToolsService:
                 "overdue_invoices_count": len(overdue_invoices),
                 "overdue_amount": float(overdue_amount),
             },
+        }
+
+    # =========================================================================
+    # Action Tools with Confirmation & Session Follow-Up
+    # =========================================================================
+
+    @classmethod
+    def get_top_customers(cls, session_id: str = "default") -> Dict[str, Any]:
+        """Follow-up tool when the user asks 'and who are the top 3 customers for that?'.
+
+        Retrieves top customers from the current conversational session context.
+        """
+        session = VoiceSessionService.get_session(session_id)
+        last_context = session.get("last_context")
+        ctx_data = session.get("context_data", {})
+        top_3 = ctx_data.get("top_customers", [])
+
+        if not top_3 and not last_context:
+            # Fallback to current pending invoices
+            qs = Invoice.objects.filter(status="pending").select_related("customer")
+            cust_totals: Dict[str, Decimal] = {}
+            for inv in qs:
+                name = inv.customer.name
+                cust_totals[name] = cust_totals.get(name, Decimal("0.00")) + inv.amount
+            sorted_cust = sorted(cust_totals.items(), key=lambda x: x[1], reverse=True)[:3]
+            top_3 = [{"customer": name, "amount": float(amt)} for name, amt in sorted_cust]
+            last_context = "pending_invoices"
+
+        if not top_3:
+            speech = "I couldn't find any customer balances for that context."
+        else:
+            names_str = ", ".join(f"{c['customer']} ({c['amount']:,.2f} rupees)" for c in top_3)
+            context_labels = {
+                "pending_invoices": f"pending invoices{(' for ' + ctx_data.get('month')) if ctx_data.get('month') else ''}",
+                "sales_summary": f"sales for {ctx_data.get('period_label', 'the period')}",
+                "overdue_invoices": "overdue invoices",
+            }
+            ctx_label = context_labels.get(last_context, "that query")
+            speech = f"For your {ctx_label}, the top 3 customers are {names_str}."
+
+        return {
+            "speech": speech,
+            "data": {
+                "context": last_context,
+                "top_customers": top_3,
+            },
+        }
+
+    @classmethod
+    def draft_purchase_order(
+        cls,
+        item_skus: Optional[List[str]] = None,
+        session_id: str = "default",
+    ) -> Dict[str, Any]:
+        """Auto-picks low-stock items, groups by supplier, creates DRAFT POs, and returns summary + draft_id.
+
+        Never alters status to confirmed without an explicit confirmation step.
+        """
+        if item_skus:
+            items = list(Item.objects.filter(sku__in=item_skus).select_related("supplier"))
+            if not items:
+                return {
+                    "speech": "No inventory items were found matching the provided SKUs.",
+                    "data": {
+                        "success": False,
+                        "error": "No items found for provided SKUs",
+                    },
+                }
+        else:
+            all_items = Item.objects.select_related("supplier").all()
+            items = [i for i in all_items if i.is_below_reorder_level]
+            if not items:
+                return {
+                    "speech": "All inventory items are currently above their reorder level. No draft purchase orders are needed.",
+                    "data": {
+                        "count": 0,
+                        "draft_id": None,
+                        "po_ids": [],
+                    },
+                }
+
+        # Group items by supplier
+        supplier_map: Dict[Any, List[Item]] = {}
+        for item in items:
+            supplier_map.setdefault(item.supplier, []).append(item)
+
+        created_pos: List[PurchaseOrder] = []
+        total_qty = 0
+
+        with transaction.atomic():
+            for supplier, sup_items in supplier_map.items():
+                po = PurchaseOrder.objects.create(supplier=supplier, status="draft")
+                for it in sup_items:
+                    order_qty = max(it.reorder_level * 2 - it.stock_qty, it.reorder_level, 10)
+                    PurchaseOrderLine.objects.create(po=po, item=it, qty=order_qty)
+                    total_qty += order_qty
+                created_pos.append(po)
+
+        primary_id = created_pos[0].id
+        draft_id = f"DRAFT-PO-{primary_id}"
+        po_ids = [p.id for p in created_pos]
+        supplier_names = [s.name for s in supplier_map.keys()]
+
+        # Store draft info in session state for follow-up and confirmation
+        session = VoiceSessionService.get_session(session_id)
+        session["last_draft_id"] = draft_id
+        session["last_draft_po_ids"] = po_ids
+
+        VoiceSessionService.set_context(
+            session_id=session_id,
+            context_type="draft_purchase_order",
+            data={
+                "draft_id": draft_id,
+                "po_ids": po_ids,
+                "suppliers": supplier_names,
+            },
+        )
+        VoiceSessionService.set_pending_action(
+            session_id=session_id,
+            action_data={
+                "type": "confirm_purchase_order",
+                "draft_id": draft_id,
+                "po_ids": po_ids,
+                "suppliers": supplier_names,
+            },
+        )
+
+        sup_names_str = ", ".join(supplier_names)
+        speech = (
+            f"I have created draft purchase orders for {len(supplier_map)} suppliers ({sup_names_str}) "
+            f"covering {len(items)} low stock items with draft ID {draft_id}. Total quantity: {total_qty}. "
+            f"Would you like me to confirm them?"
+        )
+
+        return {
+            "speech": speech,
+            "data": {
+                "draft_id": draft_id,
+                "status": "draft",
+                "requires_confirmation": True,
+                "po_count": len(created_pos),
+                "po_ids": po_ids,
+                "suppliers": supplier_names,
+                "items_count": len(items),
+                "total_quantity": total_qty,
+                "items": [
+                    {"sku": it.sku, "name": it.name, "supplier": it.supplier.name}
+                    for it in items
+                ],
+            },
+        }
+
+    @classmethod
+    def confirm_purchase_order(
+        cls,
+        draft_id: Optional[str] = None,
+        session_id: str = "default",
+    ) -> Dict[str, Any]:
+        """Confirm a draft purchase order. Only here does status become confirmed.
+
+        If draft_id is omitted, checks session state for the last draft.
+        Fails politely if no draft purchase order exists.
+        """
+        import re
+
+        session = VoiceSessionService.get_session(session_id)
+        resolved_draft_id = draft_id or session.get("last_draft_id")
+        po_ids = []
+
+        if not resolved_draft_id:
+            return {
+                "speech": "There is no pending draft purchase order to confirm. Would you like me to create a draft first?",
+                "data": {
+                    "success": False,
+                    "error": "No draft purchase order found to confirm.",
+                },
+            }
+
+        # Check if the requested draft matches the session's batch
+        if resolved_draft_id == session.get("last_draft_id") and session.get("last_draft_po_ids"):
+            po_ids = session.get("last_draft_po_ids", [])
+        else:
+            # Extract numeric id from string e.g. 'DRAFT-PO-5' or '5'
+            nums = re.findall(r"\d+", str(resolved_draft_id))
+            po_ids = [int(n) for n in nums] if nums else []
+
+        if not po_ids:
+            return {
+                "speech": f"I couldn't find draft purchase order {resolved_draft_id}. Would you like me to check existing orders?",
+                "data": {
+                    "success": False,
+                    "error": f"Invalid draft purchase order ID: {resolved_draft_id}",
+                },
+            }
+
+        pos = list(PurchaseOrder.objects.filter(id__in=po_ids).select_related("supplier"))
+        if not pos:
+            return {
+                "speech": f"I couldn't find any purchase orders matching {resolved_draft_id}.",
+                "data": {
+                    "success": False,
+                    "error": f"No purchase order found for {resolved_draft_id}",
+                },
+            }
+
+        if all(p.status == "confirmed" for p in pos):
+            return {
+                "speech": f"Purchase order {resolved_draft_id} is already confirmed.",
+                "data": {
+                    "success": False,
+                    "status": "already_confirmed",
+                    "draft_id": resolved_draft_id,
+                },
+            }
+
+        confirmed_ids = []
+        supplier_names = set()
+
+        with transaction.atomic():
+            for po in pos:
+                if po.status == "draft":
+                    po.status = "confirmed"
+                    po.save(update_fields=["status"])
+                    confirmed_ids.append(po.id)
+                    supplier_names.add(po.supplier.name)
+
+        VoiceSessionService.clear_pending_action(session_id)
+
+        sup_names_str = ", ".join(sorted(supplier_names))
+        speech = f"Purchase order {resolved_draft_id} for {sup_names_str} has been confirmed."
+
+        return {
+            "speech": speech,
+            "data": {
+                "success": True,
+                "draft_id": resolved_draft_id,
+                "status": "confirmed",
+                "confirmed_po_ids": confirmed_ids,
+                "suppliers": sorted(supplier_names),
+            },
+        }
+
+    @classmethod
+    def approve_leave(
+        cls,
+        employee_name: str,
+        confirm: bool = False,
+        session_id: str = "default",
+    ) -> Dict[str, Any]:
+        """Approve an employee leave request using an ask-then-confirm workflow.
+
+        Never modifies database status without confirm=True.
+        """
+        leave = (
+            LeaveRequest.objects.filter(
+                employee__name__icontains=employee_name.strip(),
+                status="pending",
+            )
+            .select_related("employee")
+            .order_by("from_date")
+            .first()
+        )
+        if not leave:
+            return {
+                "speech": f"I couldn't find any pending leave request for {employee_name}.",
+                "data": {
+                    "success": False,
+                    "error": f"No pending leave found for {employee_name}",
+                },
+            }
+
+        emp_name = leave.employee.name
+        date_range = f"{leave.from_date} to {leave.to_date}"
+        reason_str = f" for '{leave.reason}'" if leave.reason else ""
+
+        if not confirm:
+            VoiceSessionService.set_pending_action(
+                session_id=session_id,
+                action_data={
+                    "type": "approve_leave",
+                    "employee_name": emp_name,
+                    "leave_id": leave.id,
+                    "date_range": date_range,
+                },
+            )
+            return {
+                "speech": f"{emp_name} has requested leave from {date_range}{reason_str}. Should I confirm this approval?",
+                "data": {
+                    "requires_confirmation": True,
+                    "action": "approve_leave",
+                    "leave_id": leave.id,
+                    "employee": emp_name,
+                    "from_date": leave.from_date.isoformat(),
+                    "to_date": leave.to_date.isoformat(),
+                    "reason": leave.reason,
+                },
+            }
+
+        # Execute only upon confirmation
+        leave.status = "approved"
+        leave.save(update_fields=["status"])
+        VoiceSessionService.clear_pending_action(session_id)
+
+        return {
+            "speech": f"Leave request for {emp_name} from {date_range} has been confirmed and approved.",
+            "data": {
+                "success": True,
+                "status": "approved",
+                "leave_id": leave.id,
+                "employee": emp_name,
+            },
+        }
+
+    @classmethod
+    def reject_leave(
+        cls,
+        employee_name: str,
+        reason: str = "",
+        confirm: bool = False,
+        session_id: str = "default",
+    ) -> Dict[str, Any]:
+        """Reject an employee leave request using an ask-then-confirm workflow.
+
+        Never modifies database status without confirm=True.
+        """
+        leave = (
+            LeaveRequest.objects.filter(
+                employee__name__icontains=employee_name.strip(),
+                status="pending",
+            )
+            .select_related("employee")
+            .order_by("from_date")
+            .first()
+        )
+        if not leave:
+            return {
+                "speech": f"I couldn't find any pending leave request for {employee_name}.",
+                "data": {
+                    "success": False,
+                    "error": f"No pending leave found for {employee_name}",
+                },
+            }
+
+        emp_name = leave.employee.name
+        date_range = f"{leave.from_date} to {leave.to_date}"
+
+        if not confirm:
+            VoiceSessionService.set_pending_action(
+                session_id=session_id,
+                action_data={
+                    "type": "reject_leave",
+                    "employee_name": emp_name,
+                    "leave_id": leave.id,
+                    "reason": reason,
+                    "date_range": date_range,
+                },
+            )
+            reason_phrase = f" with reason '{reason}'" if reason else ""
+            return {
+                "speech": f"Are you sure you want to reject {emp_name}'s leave request from {date_range}{reason_phrase}? Please confirm.",
+                "data": {
+                    "requires_confirmation": True,
+                    "action": "reject_leave",
+                    "leave_id": leave.id,
+                    "employee": emp_name,
+                    "reason": reason,
+                },
+            }
+
+        # Execute only upon confirmation
+        leave.status = "rejected"
+        if reason:
+            leave.reason = f"{leave.reason} (Rejected: {reason})" if leave.reason else f"Rejected: {reason}"
+        leave.save(update_fields=["status", "reason"])
+        VoiceSessionService.clear_pending_action(session_id)
+
+        return {
+            "speech": f"Leave request for {emp_name} from {date_range} has been rejected.",
+            "data": {
+                "success": True,
+                "status": "rejected",
+                "leave_id": leave.id,
+                "employee": emp_name,
+                "reason": reason,
+            },
+        }
+
+    @classmethod
+    def confirm_action(cls, session_id: str = "default") -> Dict[str, Any]:
+        """Universal confirmation handler for voice intent 'confirm it'.
+
+        Resolves whichever staged action (draft PO, leave approval, leave rejection) is pending.
+        """
+        pending = VoiceSessionService.get_pending_action(session_id)
+        if not pending:
+            # Fallback to check if a draft PO was created in this session
+            session = VoiceSessionService.get_session(session_id)
+            if session.get("last_draft_id"):
+                return cls.confirm_purchase_order(draft_id=session.get("last_draft_id"), session_id=session_id)
+            return {
+                "speech": "There are no pending actions waiting for confirmation. What would you like me to do?",
+                "data": {
+                    "success": False,
+                    "error": "No pending action found in session",
+                },
+            }
+
+        action_type = pending.get("type")
+        if action_type == "confirm_purchase_order":
+            return cls.confirm_purchase_order(draft_id=pending.get("draft_id"), session_id=session_id)
+        elif action_type == "approve_leave":
+            return cls.approve_leave(employee_name=pending.get("employee_name"), confirm=True, session_id=session_id)
+        elif action_type == "reject_leave":
+            return cls.reject_leave(
+                employee_name=pending.get("employee_name"),
+                reason=pending.get("reason", ""),
+                confirm=True,
+                session_id=session_id,
+            )
+
+        return {
+            "speech": "There are no pending actions waiting for confirmation.",
+            "data": {"success": False, "error": f"Unknown action type {action_type}"},
         }
 

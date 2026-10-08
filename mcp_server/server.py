@@ -38,28 +38,42 @@ mcp_server = MCPServer(SERVER_NAME)
 
 
 # ============================================================================
-# Core Alexa+ Voice Tools
+# Core Alexa+ Voice Tools & Context Follow-Ups
 # ============================================================================
 
 @mcp_server.tool()
-async def get_pending_invoices(month: Optional[str] = None) -> Dict[str, Any]:
+async def get_pending_invoices(
+    month: Optional[str] = None,
+    session_id: str = "default",
+) -> Dict[str, Any]:
     """Retrieve pending customer invoices with total count, total amount in rupees, and top 3 customers.
 
     Alexa reads the short speech summary aloud. Optionally filter by month name (e.g. 'October', 'November') or number (e.g. '10', '2026-10').
+    Remembers top customers and amounts in conversational session state.
 
     Args:
         month: Optional month filter (e.g. 'October', '10', or '2026-10'). If omitted, returns all pending invoices.
+        session_id: Conversational session identifier for contextual follow-up questions.
     """
-    return await sync_to_async(VoiceERPToolsService.get_pending_invoices)(month=month)
+    return await sync_to_async(VoiceERPToolsService.get_pending_invoices)(
+        month=month,
+        session_id=session_id,
+    )
 
 
 @mcp_server.tool()
-async def get_overdue_invoices() -> Dict[str, Any]:
+async def get_overdue_invoices(session_id: str = "default") -> Dict[str, Any]:
     """Retrieve all overdue customer invoices with customer names, amounts, and number of days overdue.
 
     Alexa reads the short speech summary aloud. Returns a list sorted by days overdue.
+    Remembers customers in conversational session state.
+
+    Args:
+        session_id: Conversational session identifier for contextual follow-up questions.
     """
-    return await sync_to_async(VoiceERPToolsService.get_overdue_invoices)()
+    return await sync_to_async(VoiceERPToolsService.get_overdue_invoices)(
+        session_id=session_id,
+    )
 
 
 @mcp_server.tool()
@@ -81,15 +95,143 @@ async def get_pending_leaves() -> Dict[str, Any]:
 
 
 @mcp_server.tool()
-async def get_sales_summary(period: str = "month") -> Dict[str, Any]:
+async def get_sales_summary(
+    period: str = "month",
+    session_id: str = "default",
+) -> Dict[str, Any]:
     """Retrieve sales and invoice revenue summaries for today, this week, or this month.
 
-    Alexa reads the short speech summary aloud.
+    Alexa reads the short speech summary aloud. Remembers period and top customers in conversational session state.
 
     Args:
         period: Time window to summarize. Allowed values: 'today', 'week', or 'month'. Defaults to 'month'.
+        session_id: Conversational session identifier for contextual follow-up questions.
     """
-    return await sync_to_async(VoiceERPToolsService.get_sales_summary)(period=period)
+    return await sync_to_async(VoiceERPToolsService.get_sales_summary)(
+        period=period,
+        session_id=session_id,
+    )
+
+
+@mcp_server.tool()
+async def get_top_customers(session_id: str = "default") -> Dict[str, Any]:
+    """Follow-up tool when the user asks 'and who are the top 3 customers for that?'.
+
+    Retrieves top customers from the current conversational session context (such as pending invoices, sales summary, or overdue invoices).
+
+    Args:
+        session_id: Conversational session identifier matching the previous query.
+    """
+    return await sync_to_async(VoiceERPToolsService.get_top_customers)(
+        session_id=session_id,
+    )
+
+
+# ============================================================================
+# Action Tools with Ask-Then-Confirm Pattern
+# ============================================================================
+
+@mcp_server.tool()
+async def draft_purchase_order(
+    item_skus: Optional[List[str]] = None,
+    session_id: str = "default",
+) -> Dict[str, Any]:
+    """Draft purchase orders for low-stock inventory items grouped by supplier without confirming.
+
+    Auto-picks all items currently below their reorder level if no SKUs are specified.
+    Creates draft orders, returns a spoken summary with a draft_id, and requires confirmation before changing status.
+
+    Args:
+        item_skus: Optional list of item SKUs to order (e.g. ['SKU-IND-001', 'SKU-IND-005']). If omitted, auto-picks all low-stock items.
+        session_id: Conversational session identifier for tracking the active draft.
+    """
+    return await sync_to_async(VoiceERPToolsService.draft_purchase_order)(
+        item_skus=item_skus,
+        session_id=session_id,
+    )
+
+
+@mcp_server.tool()
+async def confirm_purchase_order(
+    draft_id: Optional[str] = None,
+    session_id: str = "default",
+) -> Dict[str, Any]:
+    """Confirm a draft purchase order so its status becomes confirmed.
+
+    Only alters database status to confirmed upon execution of this tool.
+    If draft_id is omitted, looks up the last draft created in the session. Fails politely if no draft exists.
+
+    Args:
+        draft_id: Optional draft ID returned by draft_purchase_order (e.g. 'DRAFT-PO-10'). If omitted, uses the session's active draft.
+        session_id: Conversational session identifier.
+    """
+    return await sync_to_async(VoiceERPToolsService.confirm_purchase_order)(
+        draft_id=draft_id,
+        session_id=session_id,
+    )
+
+
+@mcp_server.tool()
+async def approve_leave(
+    employee_name: str,
+    confirm: bool = False,
+    session_id: str = "default",
+) -> Dict[str, Any]:
+    """Approve an employee leave request using an ask-then-confirm workflow.
+
+    When confirm=False (initial ask), checks the pending request and asks the user to confirm without altering status.
+    When confirm=True (or when confirmed via session), changes the status to approved in the database.
+
+    Args:
+        employee_name: Full or partial employee name (e.g. 'Rajesh Sharma').
+        confirm: True to execute the approval in the database; False to stage and ask for user confirmation first.
+        session_id: Conversational session identifier.
+    """
+    return await sync_to_async(VoiceERPToolsService.approve_leave)(
+        employee_name=employee_name,
+        confirm=confirm,
+        session_id=session_id,
+    )
+
+
+@mcp_server.tool()
+async def reject_leave(
+    employee_name: str,
+    reason: str = "",
+    confirm: bool = False,
+    session_id: str = "default",
+) -> Dict[str, Any]:
+    """Reject an employee leave request using an ask-then-confirm workflow.
+
+    When confirm=False (initial ask), asks the user to confirm without altering status.
+    When confirm=True (or when confirmed via session), changes the status to rejected and records the rejection reason.
+
+    Args:
+        employee_name: Full or partial employee name (e.g. 'Rajesh Sharma').
+        reason: Reason for rejection (e.g. 'Peak project milestone').
+        confirm: True to execute the rejection in the database; False to stage and ask for user confirmation first.
+        session_id: Conversational session identifier.
+    """
+    return await sync_to_async(VoiceERPToolsService.reject_leave)(
+        employee_name=employee_name,
+        reason=reason,
+        confirm=confirm,
+        session_id=session_id,
+    )
+
+
+@mcp_server.tool()
+async def confirm_action(session_id: str = "default") -> Dict[str, Any]:
+    """Universal confirmation handler when the user simply says 'confirm it'.
+
+    Executes whichever action (purchase order draft, leave approval, leave rejection) is pending confirmation in the session.
+
+    Args:
+        session_id: Conversational session identifier.
+    """
+    return await sync_to_async(VoiceERPToolsService.confirm_action)(
+        session_id=session_id,
+    )
 
 
 # ============================================================================
@@ -215,15 +357,6 @@ async def create_purchase_order(
         items=items,
     )
 
-
-@mcp_server.tool()
-async def confirm_purchase_order(po_id: int) -> Dict[str, Any]:
-    """Confirm a draft purchase order.
-
-    Args:
-        po_id: The integer ID of the purchase order.
-    """
-    return await sync_to_async(PurchaseOrderService.confirm_purchase_order)(po_id=po_id)
 
 
 @mcp_server.tool()

@@ -5,6 +5,22 @@ All notable changes to the **ERP Voice Agent** project will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-10-08
+
+### Added
+- **Action Tools with Ask-Then-Confirm Pattern**:
+  - `draft_purchase_order(item_skus: optional)`: Auto-picks low-stock items below reorder level, groups by supplier, creates DRAFT POs in SQLite, and returns a spoken summary with a `draft_id`. Never changes status to confirmed without explicit confirmation.
+  - `confirm_purchase_order(draft_id: optional)`: Explicit confirmation step that transitions draft POs to confirmed. Supports omitting `draft_id` to confirm the active draft stored in session state. Fails politely if no draft exists.
+  - `approve_leave(employee_name, confirm: optional)`: Ask-then-confirm pattern for leave approvals. When `confirm=False`, checks pending request and asks for confirmation without altering database status; when `confirm=True`, sets status to `approved`.
+  - `reject_leave(employee_name, reason, confirm: optional)`: Ask-then-confirm pattern for leave rejections with reason.
+  - `confirm_action()`: Universal handler for conversational "confirm it" intents that automatically executes whichever draft PO or leave action is pending in the session.
+- **Conversational Session State & Follow-Up Context**:
+  - Added `VoiceSessionService` tracking per-session contexts, last drafts, pending actions, and query history.
+  - `get_top_customers()`: Enables follow-up questions such as *"and who are the top 3 customers for that?"* after checking pending invoices, sales summaries, or overdue invoices.
+  - Full session isolation across concurrent user sessions.
+- **Pytest Action & Session Test Suite (`tests/test_action_confirmation.py`)**:
+  - Tests covering draft-only behavior, draft-then-confirm flow, confirming via session state without ID, polite failure when no draft exists, leave approval and rejection ask-then-confirm patterns, top customer follow-up context, and session isolation.
+
 ## [1.2.0] - 2026-10-08
 
 ### Added
