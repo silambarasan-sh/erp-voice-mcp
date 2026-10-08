@@ -1,0 +1,189 @@
+# ERP Voice Agent 🎙️🏢
+
+> **Hackathon Project**: An MCP server that enables **Alexa+** to interact with a sample ERP system (Invoices, Inventory, Purchase Orders, and HR Leave) via natural voice conversations.
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![MCP Spec](https://img.shields.io/badge/MCP%20Spec-2025--11--25-blue.svg)](https://modelcontextprotocol.io)
+[![Django](https://img.shields.io/badge/Django-5.2-green.svg)](https://www.djangoproject.com/)
+[![Tests](https://img.shields.io/badge/pytest-37%20passed-brightgreen.svg)]()
+
+---
+
+## 📁 Repository Structure
+
+```text
+erp-voice-mcp/
+├── erp_core/                     # Unified Django project + app with models
+│   ├── management/
+│   │   └── commands/
+│   │       └── seed_demo_data.py # Realistic Indian demo data generator
+│   ├── migrations/               # Database migrations
+│   ├── admin.py                  # Django admin registrations
+│   ├── apps.py                   # Django app configuration
+│   ├── asgi.py                   # ASGI application
+│   ├── models.py                 # Core domain models
+│   ├── services.py               # Voice-friendly business logic layer
+│   ├── settings.py               # Django 5 project settings
+│   ├── urls.py                   # URL configuration
+│   └── wsgi.py                   # WSGI application
+├── mcp_server/                   # MCP Streamable HTTP server
+│   ├── __init__.py
+│   ├── app.py                    # Starlette ASGI app (/mcp, /health)
+│   ├── run.py                    # CLI server launcher
+│   └── server.py                 # Registered MCP tools
+├── tests/                        # Pytest test suite (37 tests)
+│   ├── conftest.py               # Pytest fixtures and test client
+│   ├── test_models.py            # Model unit tests
+│   ├── test_seed_command.py      # Demo seed verification
+│   ├── test_invoices.py          # Invoice service tests
+│   ├── test_inventory.py         # Inventory & low stock tests
+│   ├── test_purchase_orders.py   # Purchase orders & lines tests
+│   ├── test_hr_leave.py          # HR leave requests tests
+│   ├── test_voice_tools.py       # Voice briefing & async tool tests
+│   └── test_mcp_protocol.py      # MCP 2025-11-25 & Streamable HTTP tests
+├── .env.example                  # Environment template
+├── .env                          # Local configuration (no hardcoded secrets)
+├── .gitignore                    # Git ignore file
+├── CHANGELOG.md                  # Project version changelog
+├── LICENSE                       # MIT License
+├── manage.py                     # Django management entry point
+├── pytest.ini                    # Pytest configuration
+├── requirements.txt              # Project dependencies
+└── README.md                     # Documentation
+```
+
+---
+
+## 🗃️ Data Models
+
+The ERP Core application implements the following models:
+
+1. **`Customer`**:
+   - `name`: Company / client name
+   - `city`: Operating city (e.g., Bengaluru, Mumbai, Pune)
+2. **`Supplier`**:
+   - `name`: Vendor name
+   - `phone`: Contact phone number (e.g., `+91 98201 11223`)
+   - `lead_time_days`: Fulfillment lead time
+3. **`Item`**:
+   - `sku`: Unique inventory code (e.g., `SKU-IND-001`)
+   - `name`: Item description
+   - `stock_qty`: Current quantity on hand
+   - `reorder_level`: Reorder trigger threshold
+   - `supplier`: ForeignKey to `Supplier`
+   - `is_below_reorder_level`: Property indicating stock shortage
+4. **`Invoice`**:
+   - `customer`: ForeignKey to `Customer`
+   - `invoice_no`: Unique identifier (e.g., `INV-2026-101`)
+   - `amount`: Invoice total in INR (Decimal)
+   - `status`: `paid`, `pending`, or `overdue`
+   - `due_date`: Payment due date
+   - `created_at`: Creation timestamp
+5. **`PurchaseOrder`**:
+   - `supplier`: ForeignKey to `Supplier`
+   - `status`: `draft` or `confirmed`
+   - `created_at`: Creation timestamp
+6. **`PurchaseOrderLine`**:
+   - `po`: ForeignKey to `PurchaseOrder`
+   - `item`: ForeignKey to `Item`
+   - `qty`: Quantity ordered
+7. **`Employee`**:
+   - `name`: Full employee name
+   - `department`: Department (Engineering, Operations, Finance, etc.)
+8. **`LeaveRequest`**:
+   - `employee`: ForeignKey to `Employee`
+   - `from_date`: Start date
+   - `to_date`: End date
+   - `status`: `pending`, `approved`, or `rejected`
+   - `reason`: Leave explanation
+
+---
+
+## 🌐 MCP Protocol & Streamable HTTP Compliance
+
+- **MCP Specification Version**: **`2025-11-25`**
+- **Transport**: **Streamable HTTP** mounted at `/mcp`
+- **SDK**: Official Anthropic `mcp` Python SDK (v2.3.0)
+- **Header Support**: Negotiates and returns `MCP-Protocol-Version: 2025-11-25`
+
+---
+
+## 🚀 Setup & Execution
+
+### 1. Install Dependencies
+```bash
+pip install -r requirements.txt
+```
+
+### 2. Configure Environment
+```bash
+cp .env.example .env
+```
+*(On Windows PowerShell: `Copy-Item .env.example .env`)*
+
+### 3. Apply Migrations & Seed Demo Data
+```bash
+python manage.py makemigrations erp_core
+python manage.py migrate
+python manage.py seed_demo_data
+```
+
+The `seed_demo_data` command generates:
+- **5 Indian Suppliers** (e.g., Reliance Industrial Polymers, Tata Advanced Components)
+- **10 Indian Customers** across major metropolitan hubs (Bengaluru, Mumbai, Pune, Chennai, Delhi)
+- **25 Items** (with multiple critical items below reorder levels)
+- **30 Invoices** distributed across `paid`, `pending`, and `overdue`
+- **15 Employees** across 5 business departments
+- **8 Pending Leave Requests** ready for manager sign-off
+
+---
+
+## 🏃 Running the MCP Server
+
+Start the MCP Streamable HTTP server:
+```bash
+python -m mcp_server.run
+```
+Or with Uvicorn:
+```bash
+uvicorn mcp_server.app:app --host 127.0.0.1 --port 8000
+```
+
+- **MCP Endpoint**: `http://127.0.0.1:8000/mcp`
+- **Health Check**: `http://127.0.0.1:8000/health`
+- **Root Info**: `http://127.0.0.1:8000/`
+
+---
+
+## 🧪 Running Tests
+
+Run the complete test suite with pytest:
+```bash
+python -m pytest -v
+```
+
+All **37 tests** validate:
+- Models: Customer, Supplier, Item, Invoice, PurchaseOrder, PurchaseOrderLine, Employee, LeaveRequest
+- Management command: `seed_demo_data` (counts, data integrity, idempotency)
+- Domain services: Invoices, Inventory, POs, HR Leave
+- Executive Voice Briefing for Alexa+
+- MCP protocol spec `2025-11-25` and Streamable HTTP endpoints
+
+---
+
+## 📡 Verification Commands
+
+### 1. Check Health & Protocol Spec Version:
+```bash
+curl -i http://127.0.0.1:8000/health
+```
+
+### 2. Streamable HTTP Header Negotiation:
+```bash
+curl -i -H "MCP-Protocol-Version: 2025-11-25" http://127.0.0.1:8000/mcp
+```
+
+---
+
+## 📄 License
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
