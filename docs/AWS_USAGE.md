@@ -88,7 +88,7 @@ The agent executes a multi-turn Amazon Bedrock Converse tool-use loop:
    - MCP returns `toolResult` blocks back to Bedrock Converse.
 4. **Model-Driven Plan & Final Speech**:
    - `plan_steps` is constructed directly from the actual tool calls executed by the model.
-   - Spoken summary is derived from the model's final response (which must mention the draft ID, e.g., `DRAFT-PO-4`).
+   - The spoken sentence is built directly from the real tool execution results (draft ID, supplier name, lead time, item count, and remaining low-stock items from slower suppliers). The model's own text candidate is used only when it is short plain text (< 45 words, 2 sentences, without markdown or lists).
    - Reports `planner_mode: "bedrock"` only when the model has made valid tool calls.
 5. **Human-in-the-Loop Confirmation**:
    - The system awaits explicit user voice confirmation ("Confirm it").
@@ -109,17 +109,17 @@ sequenceDiagram
     MCP->>ERP: Query inventory below reorder level & supplier lead times
     ERP-->>MCP: Low stock items & lead times
     MCP->>Bedrock: toolResult: items & supplier lead times
-    Bedrock-->>MCP: toolUse: draft_purchase_order(item_skus=["SKU-1001", ...])
+    Bedrock-->>MCP: toolUse: draft_purchase_order(item_skus=["SKU-IND-001", ...])
     Note over MCP: Python Guardrails: validate SKUs, cap qty (<=100), draft status only
-    MCP->>ERP: Create DRAFT Purchase Orders (DRAFT-PO-4)
+    MCP->>ERP: Create DRAFT Purchase Orders (DRAFT-PO-<n>)
     ERP-->>MCP: Draft PO created
-    MCP->>Session: Stages DRAFT-PO-4 for human confirmation
-    MCP->>Bedrock: toolResult: success, draft_id="DRAFT-PO-4"
-    Bedrock-->>MCP: Final response: "I reviewed low stock items... drafted order DRAFT-PO-4. Would you like me to confirm it?" (stopReason: "end_turn")
-    MCP-->>User: Spoken plan summary with DRAFT-PO-4 & Bedrock tool-trace card
+    MCP->>Session: Stages DRAFT-PO-<n> for human confirmation
+    MCP->>Bedrock: toolResult: success, draft_id="DRAFT-PO-<n>"
+    Bedrock-->>MCP: Final response text candidate (stopReason: "end_turn")
+    MCP-->>User: Spoken plan summary with DRAFT-PO-<n> & Bedrock tool-trace card
     User->>MCP: "Confirm it"
     MCP->>ERP: confirm_action() -> changes status to confirmed
-    ERP-->>User: "Purchase order DRAFT-PO-4 has been confirmed."
+    ERP-->>User: "Purchase order DRAFT-PO-<n> has been confirmed."
 ```
 
 ---
