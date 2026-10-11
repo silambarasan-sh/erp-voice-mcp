@@ -24,6 +24,7 @@ def test_chat_page_endpoint(web_client):
     assert "id=\"conversation-view\"" in html
     assert "SpeechSynthesisUtterance" in html
     assert "webkitSpeechRecognition" in html
+    assert "Planning with Bedrock..." in html
 
 
 @pytest.mark.django_db(transaction=True)
@@ -52,6 +53,11 @@ def test_chat_api_routing_replenishment(web_client):
     assert "data" in data
     assert data["data"]["draft_id"] is not None
     assert "plan_steps" in data["data"]
+    assert "latency_ms" in data
+    assert "bedrock_calls" in data
+    assert data["bedrock_calls"] == 0
+    assert "latency_ms" in data["data"]
+    assert "bedrock_calls" in data["data"]
 
 
 @pytest.mark.django_db(transaction=True)

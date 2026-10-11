@@ -849,7 +849,8 @@
       appendUserMessage(text);
 
       // Show typing indicator
-      const typingEl = appendTypingIndicator();
+      const isPlanning = /restock|fastest|supplier|replenish|plan/i.test(text);
+      const typingEl = appendTypingIndicator(isPlanning ? "Planning with Bedrock..." : "Alexa is reasoning...");
 
       try {
         const response = await fetch("/api/chat", {
@@ -888,14 +889,15 @@
       window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
     }
 
-    function appendTypingIndicator() {
+    function appendTypingIndicator(label) {
       const row = document.createElement("div");
       row.className = "message-row alexa typing";
+      const textLabel = label || "Alexa is reasoning...";
       row.innerHTML = `
         <div class="avatar alexa">🎙️</div>
         <div class="message-body">
           <div class="speech-bubble" style="display:flex; gap: 4px; align-items:center;">
-            <span>Alexa is reasoning</span>
+            <span>${escapeHtml(textLabel)}</span>
             <span style="animation: pulse 1s infinite">...</span>
           </div>
         </div>
@@ -1071,24 +1073,26 @@
       // 5. Transparent Supply Chain Planner Card
       if (data.plan_steps && Array.isArray(data.plan_steps)) {
         const mode = data.planner_mode || payload.planner_mode || (data.mock_mode ? 'mock' : 'bedrock');
+        const latencyMs = (data.latency_ms !== undefined) ? data.latency_ms : payload.latency_ms;
+        const latencyStr = (latencyMs !== undefined && latencyMs !== null) ? ` ${(latencyMs / 1000).toFixed(1)}s` : '';
         let badgeHtml = '';
         let cardTitle = '⚡ Supply Chain Plan';
         let confirmBtnLabel = '✓ Confirm Plan';
 
         if (mode === 'bedrock') {
           updatePlannerModeDisplay('bedrock');
-          badgeHtml = '<span class="pill" style="font-size: 0.72rem; background: rgba(16, 185, 129, 0.15); color: #10B981; border: 1px solid rgba(16, 185, 129, 0.4);">Bedrock (live)</span>';
+          badgeHtml = `<span class="pill" style="font-size: 0.72rem; background: rgba(16, 185, 129, 0.15); color: #10B981; border: 1px solid rgba(16, 185, 129, 0.4);">Bedrock (live)${latencyStr}</span>`;
           cardTitle = '⚡ Amazon Bedrock Plan';
           confirmBtnLabel = '✓ Confirm Bedrock Plan';
         } else if (mode === 'fallback') {
           updatePlannerModeDisplay('fallback');
-          badgeHtml = '<span class="pill" style="font-size: 0.72rem; background: rgba(245, 158, 11, 0.15); color: #F59E0B; border: 1px solid rgba(245, 158, 11, 0.4);">Fallback</span>';
+          badgeHtml = `<span class="pill" style="font-size: 0.72rem; background: rgba(245, 158, 11, 0.15); color: #F59E0B; border: 1px solid rgba(245, 158, 11, 0.4);">Fallback${latencyStr}</span>`;
           cardTitle = '⚡ Supply Chain Plan (Local Fallback)';
           confirmBtnLabel = '✓ Confirm Plan';
         } else {
           // 'mock'
           updatePlannerModeDisplay('mock');
-          badgeHtml = '<span class="pill" style="font-size: 0.72rem; background: rgba(139, 92, 246, 0.15); color: #A78BFA; border: 1px solid rgba(139, 92, 246, 0.4);">Mock mode</span>';
+          badgeHtml = `<span class="pill" style="font-size: 0.72rem; background: rgba(139, 92, 246, 0.15); color: #A78BFA; border: 1px solid rgba(139, 92, 246, 0.4);">Mock mode${latencyStr}</span>`;
           cardTitle = '⚡ Supply Chain Plan';
           confirmBtnLabel = '✓ Confirm Plan';
         }

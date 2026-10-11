@@ -73,7 +73,14 @@ def check_bedrock() -> int:
     print("Sending test prompt: 'Say hello in one short sentence.' ...")
 
     try:
-        client = boto3.client("bedrock-runtime", region_name=region)
+        from botocore.config import Config
+
+        boto_config = Config(
+            connect_timeout=5,
+            read_timeout=20,
+            retries={"max_attempts": 2, "mode": "standard"},
+        )
+        client = boto3.client("bedrock-runtime", region_name=region, config=boto_config)
         start_time = time.time()
         response = client.converse(
             modelId=model_id,

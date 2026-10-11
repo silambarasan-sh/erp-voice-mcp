@@ -2,6 +2,7 @@
 
 import json
 import logging
+import time
 from typing import Any, Dict, List, Optional
 from erp_core.models import Item, Supplier
 from erp_core.services import VoiceERPToolsService, VoiceSessionService
@@ -40,8 +41,11 @@ class ERPPlannerAgent:
         session_id: str = "default",
         planner_mode: str = "mock",
         fallback_reason: Optional[str] = None,
+        latency_ms: Optional[int] = None,
+        bedrock_calls: int = 0,
     ) -> Dict[str, Any]:
         """Deterministic multi-step planning simulation matching Bedrock execution trace."""
+        mock_start = time.time()
         cleaned_prompt = prompt.lower().strip()
         plan_steps: List[str] = []
 
@@ -58,6 +62,10 @@ class ERPPlannerAgent:
             else "ERP Supply Chain Planner"
         )
 
+        effective_latency_ms = (
+            latency_ms if latency_ms is not None else int((time.time() - mock_start) * 1000)
+        )
+
         if not low_stock_items:
             speech = "All inventory items are currently well-stocked above reorder levels. No purchase orders are needed."
             data_payload = {
@@ -67,6 +75,8 @@ class ERPPlannerAgent:
                 "aws_region": AWSConfig.get_region(),
                 "mock_mode": (planner_mode != "bedrock"),
                 "planner_mode": planner_mode,
+                "latency_ms": effective_latency_ms,
+                "bedrock_calls": bedrock_calls,
                 "prompt": prompt,
                 "plan_steps": plan_steps,
                 "draft_id": None,
@@ -80,6 +90,8 @@ class ERPPlannerAgent:
             res = {
                 "speech": speech,
                 "planner_mode": planner_mode,
+                "latency_ms": effective_latency_ms,
+                "bedrock_calls": bedrock_calls,
                 "data": data_payload,
             }
             if fallback_reason:
@@ -165,6 +177,8 @@ class ERPPlannerAgent:
             "aws_region": AWSConfig.get_region(),
             "mock_mode": (planner_mode != "bedrock"),
             "planner_mode": planner_mode,
+            "latency_ms": effective_latency_ms,
+            "bedrock_calls": bedrock_calls,
             "prompt": prompt,
             "plan_steps": plan_steps,
             "fastest_supplier": selected_supplier_info,
@@ -195,6 +209,8 @@ class ERPPlannerAgent:
         res = {
             "speech": speech,
             "planner_mode": planner_mode,
+            "latency_ms": effective_latency_ms,
+            "bedrock_calls": bedrock_calls,
             "data": data_payload,
         }
         if fallback_reason:
@@ -208,6 +224,8 @@ class ERPPlannerAgent:
         session_id: str = "default",
     ) -> Dict[str, Any]:
         """Invoke Amazon Bedrock Foundation Model via boto3 Converse API / Strands Agents SDK."""
+        start_time = time.time()
+        bedrock_calls = 0
         try:
             client = AWSConfig.get_bedrock_runtime_client()
             if client is None:
@@ -220,6 +238,8 @@ class ERPPlannerAgent:
                 "Always adhere to the confirmation principle: never confirm without user approval."
             )
 
+            call_start = time.time()
+            bedrock_calls += 1
             response = client.converse(
                 modelId=model_id,
                 system=[{"text": system_prompt}],
@@ -231,27 +251,41 @@ class ERPPlannerAgent:
                 ],
                 inferenceConfig={"temperature": 0.2, "maxTokens": 500},
             )
+            call_latency_ms = int((time.time() - call_start) * 1000)
+            logger.info(
+                "Amazon Bedrock call completed in %d ms (model: %s, stopReason: %s)",
+                call_latency_ms,
+                model_id,
+                response.get("stopReason", "end_turn"),
+            )
 
             # Structured execution to generate actual PO records in DB with planner_mode='bedrock'
             AWSConfig.set_last_live_call("ok")
+            total_latency_ms = int((time.time() - start_time) * 1000)
             result = cls._plan_and_execute_mock(
                 prompt=prompt,
                 session_id=session_id,
                 planner_mode="bedrock",
+                latency_ms=total_latency_ms,
+                bedrock_calls=bedrock_calls,
             )
             result["data"]["bedrock_response_status"] = response.get("stopReason", "end_turn")
             return result
 
         except Exception as exc:
+            call_latency_ms = int((time.time() - start_time) * 1000)
+            logger.warning(
+                "Amazon Bedrock call failed after %d ms (%s). Falling back to local deterministic planner.",
+                call_latency_ms,
+                exc,
+            )
             AWSConfig.set_last_live_call("failed")
             error_reason = str(exc)
-            logger.warning(
-                "Amazon Bedrock planner call failed (%s). Falling back to local deterministic planner.",
-                error_reason,
-            )
             return cls._plan_and_execute_mock(
                 prompt=prompt,
                 session_id=session_id,
                 planner_mode="fallback",
                 fallback_reason=error_reason,
+                latency_ms=call_latency_ms,
+                bedrock_calls=bedrock_calls,
             )

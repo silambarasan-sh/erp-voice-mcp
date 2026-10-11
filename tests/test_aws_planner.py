@@ -57,6 +57,11 @@ def test_plan_fastest_supplier_replenishment():
     assert draft_id.startswith("DRAFT-PO-")
     assert data["status"] == "draft"
     assert data["requires_confirmation"] is True
+    assert "latency_ms" in result
+    assert "bedrock_calls" in result
+    assert result["bedrock_calls"] == 0
+    assert result["data"]["bedrock_calls"] == 0
+    assert result["data"]["latency_ms"] >= 0
 
     for po_id in data["po_ids"]:
         po = PurchaseOrder.objects.get(id=po_id)
@@ -153,6 +158,9 @@ def test_planner_mode_bedrock_live_success(monkeypatch):
     assert mock_client.converse.called is True
     assert "draft_id" in result["data"]
     assert AWSConfig.get_last_live_call() == "ok"
+    assert result["bedrock_calls"] == 1
+    assert result["data"]["bedrock_calls"] == 1
+    assert result["latency_ms"] >= 0
 
 
 @pytest.mark.django_db(transaction=True)
@@ -180,6 +188,9 @@ def test_planner_mode_fallback_on_bedrock_error(monkeypatch, caplog):
     assert result["data"]["planner_mode"] == "fallback"
     assert result["data"]["mock_mode"] is True
     assert AWSConfig.get_last_live_call() == "failed"
+    assert result["bedrock_calls"] == 1
+    assert result["data"]["bedrock_calls"] == 1
+    assert result["latency_ms"] >= 0
 
     # 2. Verify error reason is present in both root and data
     assert error_msg in result["fallback_reason"]
@@ -294,4 +305,30 @@ def test_check_bedrock_command_scp_deny_guidance(monkeypatch, capsys):
     assert "FAILED" in captured.out
     assert "Service Control Policy" in captured.out or "SCP" in captured.out
     assert "AmazonBedrockLimitedAccess" in captured.out
+
+
+def test_bedrock_runtime_client_explicit_timeouts_and_retries(monkeypatch):
+    """Verify get_bedrock_runtime_client configures 5s connect, 20s read timeouts, and max 1 retry."""
+    from unittest.mock import MagicMock
+    import boto3
+
+    monkeypatch.setenv("AWS_MOCK_MODE", "false")
+
+    captured_config = {}
+
+    def mock_boto_client(service_name, **kwargs):
+        captured_config["service_name"] = service_name
+        captured_config["config"] = kwargs.get("config")
+        return MagicMock()
+
+    monkeypatch.setattr(boto3, "client", mock_boto_client)
+
+    client = AWSConfig.get_bedrock_runtime_client()
+    assert client is not None
+    assert captured_config["service_name"] == "bedrock-runtime"
+    cfg = captured_config["config"]
+    assert cfg is not None
+    assert cfg.connect_timeout == 5
+    assert cfg.read_timeout == 20
+    assert cfg.retries.get("max_attempts") == 2
 

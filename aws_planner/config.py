@@ -46,7 +46,14 @@ class AWSConfig:
         # Ensure bearer token is not picked up if set in environment
         os.environ.pop("AWS_BEARER_TOKEN_BEDROCK", None)
         import boto3
+        from botocore.config import Config
 
         region = region_name or cls.get_region()
-        return boto3.client("bedrock-runtime", region_name=region)
+        # Explicit timeouts (5s connect, 20s read) and max 1 retry so failing calls fall back fast
+        boto_config = Config(
+            connect_timeout=5,
+            read_timeout=20,
+            retries={"max_attempts": 2, "mode": "standard"},
+        )
+        return boto3.client("bedrock-runtime", region_name=region, config=boto_config)
 

@@ -239,6 +239,10 @@ async def chat_api(request: Request) -> JSONResponse:
         res_body["planner_mode"] = response_payload["planner_mode"]
     if "fallback_reason" in response_payload:
         res_body["fallback_reason"] = response_payload["fallback_reason"]
+    if "latency_ms" in response_payload:
+        res_body["latency_ms"] = response_payload["latency_ms"]
+    if "bedrock_calls" in response_payload:
+        res_body["bedrock_calls"] = response_payload["bedrock_calls"]
     return JSONResponse(res_body)
 
 
@@ -312,6 +316,10 @@ async def tool_api(request: Request) -> JSONResponse:
         res_body["planner_mode"] = result["planner_mode"]
     if "fallback_reason" in result:
         res_body["fallback_reason"] = result["fallback_reason"]
+    if "latency_ms" in result:
+        res_body["latency_ms"] = result["latency_ms"]
+    if "bedrock_calls" in result:
+        res_body["bedrock_calls"] = result["bedrock_calls"]
     return JSONResponse(res_body)
 
 
