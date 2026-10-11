@@ -326,3 +326,56 @@ def test_chat_api_routing_low_stock_items(web_client):
     assert "items" in data["data"]
 
 
+@pytest.mark.django_db(transaction=True)
+def test_chat_api_restock_response_has_planner_metadata_and_traces(web_client):
+    """Verify POST /api/chat response for restock request contains planner_mode, latency_ms, and tool_traces."""
+    payload = {
+        "message": "Restock everything that's running low from the fastest supplier",
+        "session_id": "test_restock_metadata",
+    }
+    response = web_client.post("/api/chat", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+
+    # Top-level planner metadata
+    assert "planner_mode" in data
+    assert data["planner_mode"] in ["mock", "bedrock", "fallback"]
+    assert "latency_ms" in data
+    assert isinstance(data["latency_ms"], int)
+    assert data["latency_ms"] >= 0
+    assert "tool_traces" in data
+    assert isinstance(data["tool_traces"], list)
+    assert len(data["tool_traces"]) > 0
+
+    # Payload data contents
+    inner = data["data"]
+    assert inner["planner_mode"] == data["planner_mode"]
+    assert inner["latency_ms"] == data["latency_ms"]
+    assert "tool_traces" in inner
+    assert len(inner["tool_traces"]) > 0
+
+    # Structure of each trace item
+    for trace in data["tool_traces"]:
+        assert "tool" in trace
+        assert "arguments" in trace
+        assert "result" in trace
+
+
+@pytest.mark.django_db(transaction=True)
+def test_chat_page_serves_no_store_and_contains_planner_badge_markup(web_client):
+    """Verify /chat is served with Cache-Control: no-store and contains badge and 'What the model did' markup."""
+    response = web_client.get("/chat")
+    assert response.status_code == 200
+    assert "no-store" in response.headers.get("cache-control", "")
+
+    html = response.text
+    # Badge labels for all three modes
+    assert "Bedrock (live)" in html
+    assert "Mock mode" in html
+    assert "Fallback" in html
+    # Collapsible tool traces list markup
+    assert "What the model did" in html
+    assert "<details" in html
+    assert "<summary" in html
+
+

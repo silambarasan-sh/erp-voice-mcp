@@ -241,6 +241,29 @@ class ERPPlannerAgent:
                 f"Total quantity is {total_qty}; would you like me to confirm?"
             )
 
+        mock_tool_traces = [
+            {
+                "tool": "get_low_stock_items",
+                "arguments": {},
+                "result": {"count": len(low_stock_items), "items": [it.sku for it in low_stock_items]},
+            },
+            {
+                "tool": "get_supplier_lead_times",
+                "arguments": {},
+                "result": {"suppliers": [{"name": s.name, "lead_time_days": s.lead_time_days} for s in Supplier.objects.all()]},
+            },
+            {
+                "tool": "draft_purchase_order",
+                "arguments": {"item_skus": target_skus},
+                "result": {
+                    "draft_id": draft_id,
+                    "items_count": len(target_items),
+                    "total_quantity": total_qty,
+                    "suppliers": supplier_names,
+                },
+            },
+        ]
+
         data_payload = {
             "planner": planner_title,
             "model_id": AWSConfig.get_model_id(),
@@ -251,6 +274,7 @@ class ERPPlannerAgent:
             "bedrock_calls": bedrock_calls,
             "prompt": prompt,
             "plan_steps": plan_steps,
+            "tool_traces": mock_tool_traces,
             "fastest_supplier": selected_supplier_info,
             "draft_id": draft_id,
             "status": "draft",
@@ -281,6 +305,7 @@ class ERPPlannerAgent:
                 "planner_mode": planner_mode,
                 "latency_ms": effective_latency_ms,
                 "bedrock_calls": bedrock_calls,
+                "tool_traces": mock_tool_traces,
                 "data": data_payload,
             }
             if fallback_reason:
@@ -292,6 +317,7 @@ class ERPPlannerAgent:
             "planner_mode": planner_mode,
             "latency_ms": effective_latency_ms,
             "bedrock_calls": bedrock_calls,
+            "tool_traces": mock_tool_traces,
             "data": data_payload,
         }
 
@@ -476,6 +502,7 @@ class ERPPlannerAgent:
                 "planner_mode": "bedrock",
                 "latency_ms": total_latency_ms,
                 "bedrock_calls": bedrock_calls,
+                "tool_traces": executed_tool_traces,
                 "data": data_payload,
             }
 

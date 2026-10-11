@@ -1029,8 +1029,69 @@
         `;
       }
 
-      // 3. Purchase Order Draft Card (with Confirm Button!)
+      // 3. Purchase Order Draft Card (with Confirm Button and Planner Trace if available)
       if (data.draft_id && data.status === 'draft') {
+        const mode = data.planner_mode || payload.planner_mode || (data.mock_mode !== undefined ? (data.mock_mode ? 'mock' : 'bedrock') : (data.planner ? 'bedrock' : null));
+        const latencyMs = (data.latency_ms !== undefined && data.latency_ms !== null) ? data.latency_ms : payload.latency_ms;
+        const latencyStr = (latencyMs !== undefined && latencyMs !== null) ? ` ${(latencyMs / 1000).toFixed(1)}s` : '';
+        const fallbackReason = data.fallback_reason || payload.fallback_reason;
+        let badgeHtml = '';
+
+        if (mode === 'bedrock') {
+          updatePlannerModeDisplay('bedrock');
+          badgeHtml = `<span class="pill" style="font-size: 0.72rem; background: rgba(16, 185, 129, 0.15); color: #10B981; border: 1px solid rgba(16, 185, 129, 0.4);">Bedrock (live)${latencyStr}</span>`;
+        } else if (mode === 'fallback') {
+          updatePlannerModeDisplay('fallback');
+          const titleAttr = fallbackReason ? ` title="${escapeHtml(fallbackReason)}"` : '';
+          badgeHtml = `<span class="pill" style="font-size: 0.72rem; background: rgba(245, 158, 11, 0.15); color: #F59E0B; border: 1px solid rgba(245, 158, 11, 0.4);"${titleAttr}>Fallback${latencyStr}${fallbackReason ? ` (${escapeHtml(fallbackReason).slice(0, 30)})` : ''}</span>`;
+        } else if (mode === 'mock') {
+          updatePlannerModeDisplay('mock');
+          badgeHtml = `<span class="pill" style="font-size: 0.72rem; background: rgba(139, 92, 246, 0.15); color: #A78BFA; border: 1px solid rgba(139, 92, 246, 0.4);">Mock mode${latencyStr}</span>`;
+        }
+
+        const fallbackAlert = (mode === 'fallback' && fallbackReason) ? `
+          <div style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; font-size: 0.8rem; color: #FCD34D;">
+            ⚠️ <strong>Fallback Notice:</strong> Bedrock call failed (${escapeHtml(fallbackReason)}). Used local deterministic ERP planner.
+          </div>
+        ` : '';
+
+        const toolTraces = data.tool_traces || payload.tool_traces;
+        let toolTracesHtml = '';
+        if (toolTraces && Array.isArray(toolTraces) && toolTraces.length > 0) {
+          toolTracesHtml = `
+            <details style="margin-top: 10px; margin-bottom: 14px; background: rgba(0,0,0,0.3); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 8px 12px; font-size: 0.8rem;">
+              <summary style="cursor: pointer; font-weight: 600; color: var(--alexa-cyan); user-select: none;">
+                🔍 What the model did (${toolTraces.length} tool call${toolTraces.length > 1 ? 's' : ''})
+              </summary>
+              <div style="margin-top: 8px; display: flex; flex-direction: column; gap: 6px;">
+                ${toolTraces.map(t => {
+                  const toolName = escapeHtml(t.tool || 'tool');
+                  const argsStr = escapeHtml(typeof t.arguments === 'object' ? JSON.stringify(t.arguments || {}) : String(t.arguments || ''));
+                  let resStr = 'success';
+                  if (t.result) {
+                    if (typeof t.result === 'string') {
+                      resStr = t.result;
+                    } else if (t.result.error) {
+                      resStr = 'Error: ' + t.result.error;
+                    } else if (t.result.draft_id) {
+                      resStr = 'Created ' + t.result.draft_id + ' (' + (t.result.items_count || 1) + ' items, Qty: ' + (t.result.total_quantity || '') + ')';
+                    } else if (t.result.count !== undefined) {
+                      resStr = 'Found ' + t.result.count + ' records';
+                    } else {
+                      resStr = JSON.stringify(t.result).slice(0, 70);
+                    }
+                  }
+                  return `
+                    <div style="background: rgba(255,255,255,0.03); padding: 6px 8px; border-radius: 4px; font-family: monospace; font-size: 0.73rem;">
+                      <strong style="color: #10B981;">${toolName}</strong>(${argsStr}) &rarr; <span style="color: var(--text-muted);">${escapeHtml(resStr)}</span>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            </details>
+          `;
+        }
+
         const itemsList = data.items ? data.items.map(i => `
           <li style="margin-bottom: 4px;">&bull; <strong>${i.name}</strong> (${i.sku}) &mdash; Vendor: ${i.supplier}</li>
         `).join("") : "";
@@ -1038,13 +1099,18 @@
         return `
           <div class="card-container" id="card-${data.draft_id}">
             <div class="card-header">
-              <div class="card-title">📦 Purchase Order Draft: <span style="color:var(--alexa-cyan);">${data.draft_id}</span></div>
+              <div class="card-title">
+                📦 Purchase Order Draft: <span style="color:var(--alexa-cyan);">${data.draft_id}</span>
+                ${badgeHtml}
+              </div>
               <span class="pill pill-draft" id="status-pill-${data.draft_id}">STATUS: DRAFT</span>
             </div>
+            ${fallbackAlert}
             <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 10px;">
               Created draft order for <strong>${data.suppliers ? data.suppliers.join(', ') : 'Suppliers'}</strong> covering <strong>${data.items_count || data.items?.length || 0} items</strong> (Total quantity: ${data.total_quantity || 'N/A'}).
             </p>
             ${itemsList ? `<ul style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 14px; list-style: none;">${itemsList}</ul>` : ''}
+            ${toolTracesHtml}
             <div style="display:flex; gap: 10px; align-items:center;">
               <button class="btn-action-primary" id="btn-confirm-po" onclick="confirmPurchaseOrder('${data.draft_id}')">
                 ✅ Confirm Purchase Order

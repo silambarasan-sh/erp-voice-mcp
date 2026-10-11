@@ -71,7 +71,7 @@ async def chat_page(request: Request) -> HTMLResponse:
         content = content.replace("/*DEFAULT_IS_LIVE*/ false", f"/*DEFAULT_IS_LIVE*/ {'true' if live_succeeded else 'false'}")
     else:
         content = "<h1>Alexa+ ERP Web Chat</h1><p>Template not found.</p>"
-    return HTMLResponse(content)
+    return HTMLResponse(content, headers={"Cache-Control": "no-store"})
 
 
 async def chat_api(request: Request) -> JSONResponse:
@@ -243,6 +243,10 @@ async def chat_api(request: Request) -> JSONResponse:
         res_body["latency_ms"] = response_payload["latency_ms"]
     if "bedrock_calls" in response_payload:
         res_body["bedrock_calls"] = response_payload["bedrock_calls"]
+    if "tool_traces" in response_payload:
+        res_body["tool_traces"] = response_payload["tool_traces"]
+    elif "data" in response_payload and isinstance(response_payload["data"], dict) and "tool_traces" in response_payload["data"]:
+        res_body["tool_traces"] = response_payload["data"]["tool_traces"]
     return JSONResponse(res_body)
 
 
