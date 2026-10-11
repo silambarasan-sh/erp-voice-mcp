@@ -702,6 +702,18 @@
         if (restockBtn) restockBtn.textContent = "⚡ Restock Fastest Supplier";
       }
     }
+
+    // Verify initial planner mode with health endpoint (never claims Bedrock unless live call succeeded)
+    fetch('/health')
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.planner_mode === 'bedrock') {
+          updatePlannerModeDisplay('bedrock');
+        } else {
+          updatePlannerModeDisplay(data ? data.planner_mode : 'mock');
+        }
+      })
+      .catch(() => {});
     let isTTSActive = true;
     let isRecognizing = false;
     let recognition = null;

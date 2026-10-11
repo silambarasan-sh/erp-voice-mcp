@@ -49,9 +49,12 @@ The codebase interacts directly with **Amazon Bedrock** via the AWS SDK for Pyth
 - **API Utilized**: `client.converse(...)` (Bedrock Converse API)
 - **Model Utilized**: `amazon.nova-micro-v1:0` (configured via `BEDROCK_MODEL_ID` in `.env`, with cross-region inference profiles such as `us.amazon.nova-micro-v1:0` supported)
 - **Authentication**:
-  - `AWS_BEARER_TOKEN_BEDROCK`: Bedrock API Key / Bearer token (picked up automatically by `boto3`).
-  - Standard AWS credentials (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`) or IAM execution roles.
-  - **Zero Key Logging**: Bearer tokens and credentials are never printed or logged.
+  - Auth is via an **IAM user access key** (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` from `.env`, or default AWS CLI profile) with the **`AmazonBedrockLimitedAccess`** managed policy.
+  - Standard `boto3` credential resolution chain is used.
+  - **Zero Key Logging**: Access keys and secrets are never printed or logged.
+- **Friction Log Entry (Organization SCP Deny on Bearer Tokens)**:
+  - *Issue encountered*: Initial Bedrock checks failed with an AWS Organizations Service Control Policy (SCP) explicit deny on `bedrock:CallWithBearerToken`. Bearer-token (API key) authentication was blocked at the organization root level on this account.
+  - *Remediation*: Removed `AWS_BEARER_TOKEN_BEDROCK` from code paths and switched strictly to the normal `boto3` credential chain using an IAM user access key with `AmazonBedrockLimitedAccess`. This complied with organizational SCP security policies and established reliable live connectivity.
 - **Why Bedrock**:
   1. **Serverless Foundation Models**: Zero GPU provisioning or server maintenance.
   2. **Low-Latency Converse API**: Structured request/response schema designed for conversational voice latency.
@@ -117,10 +120,14 @@ sequenceDiagram
 Every response from `plan_erp_replenishment` / `ERPPlannerAgent` includes an explicit **`planner_mode`** field:
 
 | Mode | Trigger Condition | Behavior & Guarantees | Web Chat Badge |
-| :--- | :--- | :--- | :---: |
+| :--- | :--- | :--- | :--- |
 | **`"bedrock"`** | `AWS_MOCK_MODE=False` and Bedrock Converse API succeeds | Live Amazon Bedrock call reasons over the request and formulates replenishment steps. | `<span class="pill pill-confirmed">Bedrock (live)</span>` (Emerald) |
 | **`"mock"`** | `AWS_MOCK_MODE=True` (Default) | Zero-cost deterministic multi-step simulation executing identical reasoning and tool chains without calling AWS APIs. Default for automated test suites. | `<span class="pill pill-draft">Mock mode</span>` (Purple) |
 | **`"fallback"`** | `AWS_MOCK_MODE=False` but Bedrock call fails (credentials, SCP deny, quota) | Emits a clear **`WARNING`** log with the exact exception reason, attaches `fallback_reason` to the response, and falls back gracefully to deterministic planning. | `<span class="pill pill-overdue">Fallback</span>` (Amber) |
+
+### Health Check & Header Honesty Guarantees
+- **`/health` Endpoint**: Reports both `configured_mode` ("bedrock" or "mock") and `last_live_call` ("ok", "failed", or "not_called_yet"). It never claims `planner_mode: "bedrock"` unless a live call has actually succeeded.
+- **Chat Header**: Displays the neutral `"Model Context Protocol • Supply Chain Planner"` until a live call has succeeded, at which point it dynamically transitions to `"Model Context Protocol • Amazon Bedrock Planner (Live)"`.
 
 ---
 
@@ -134,6 +141,7 @@ python -m aws_planner.check
 
 This makes ONE lightweight Converse call (`"Say hello in one short sentence."`) and outputs:
 - **AWS Region & Model ID**
-- **Authentication Method** (Bearer token or IAM, secrets masked)
+- **Authentication Method** (IAM User Access Key / Profile, strictly without secrets)
 - **Call Latency** and **Bedrock reply**
 - If an error mentions that the model requires an inference profile, it outputs the exact profile ID to set in `.env` (e.g. `BEDROCK_MODEL_ID=us.amazon.nova-micro-v1:0`).
+- If an SCP denial occurs, it provides immediate guidance to verify IAM user permissions and avoid blocked bearer tokens.

@@ -20,6 +20,8 @@ class AWSConfig:
         """Return Amazon Bedrock Model ID from environment."""
         return os.getenv("BEDROCK_MODEL_ID", "amazon.nova-micro-v1:0")
 
+    _last_live_call: str = "not_called_yet"
+
     @classmethod
     def is_mock_mode(cls) -> bool:
         """Return True if AWS Mock Mode is enabled for zero-cost demos and tests."""
@@ -27,15 +29,22 @@ class AWSConfig:
         return raw in ("true", "1", "yes", "y")
 
     @classmethod
-    def has_bearer_token(cls) -> bool:
-        """Return True if AWS_BEARER_TOKEN_BEDROCK is set in environment (never logs or returns value)."""
-        return bool(os.getenv("AWS_BEARER_TOKEN_BEDROCK", "").strip())
+    def get_last_live_call(cls) -> str:
+        """Return the outcome of the last live Bedrock call: 'ok', 'failed', or 'not_called_yet'."""
+        return cls._last_live_call
+
+    @classmethod
+    def set_last_live_call(cls, status: str) -> None:
+        """Record the outcome of the last live Bedrock call ('ok', 'failed', or 'not_called_yet')."""
+        cls._last_live_call = status
 
     @classmethod
     def get_bedrock_runtime_client(cls, region_name: Optional[str] = None):
-        """Return a boto3 bedrock-runtime client if not in mock mode."""
+        """Return a boto3 bedrock-runtime client using the standard IAM credential chain if not in mock mode."""
         if cls.is_mock_mode():
             return None
+        # Ensure bearer token is not picked up if set in environment
+        os.environ.pop("AWS_BEARER_TOKEN_BEDROCK", None)
         import boto3
 
         region = region_name or cls.get_region()

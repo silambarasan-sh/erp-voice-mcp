@@ -233,6 +233,7 @@ class ERPPlannerAgent:
             )
 
             # Structured execution to generate actual PO records in DB with planner_mode='bedrock'
+            AWSConfig.set_last_live_call("ok")
             result = cls._plan_and_execute_mock(
                 prompt=prompt,
                 session_id=session_id,
@@ -242,6 +243,7 @@ class ERPPlannerAgent:
             return result
 
         except Exception as exc:
+            AWSConfig.set_last_live_call("failed")
             error_reason = str(exc)
             logger.warning(
                 "Amazon Bedrock planner call failed (%s). Falling back to local deterministic planner.",

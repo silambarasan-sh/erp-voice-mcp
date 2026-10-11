@@ -124,6 +124,37 @@ def test_chat_page_labels_honest_in_mock_mode(web_client):
 
 
 @pytest.mark.django_db(transaction=True)
+def test_chat_page_header_honest_with_unverified_or_failed_live_mode(web_client, monkeypatch):
+    """Verify chat header only displays 'Bedrock Planner' after a successful live call."""
+    import re
+    from aws_planner.config import AWSConfig
+
+    monkeypatch.setenv("AWS_MOCK_MODE", "false")
+
+    # 1. Configured mode is Bedrock, but no live call has succeeded yet
+    AWSConfig.set_last_live_call("not_called_yet")
+    html1 = web_client.get("/chat").text
+    header1 = re.search(r'<small id="header-planner-subtext"[^>]*>(.*?)</small>', html1, re.DOTALL).group(1)
+    assert "Supply Chain Planner" in header1
+    assert "Bedrock" not in header1
+
+    # 2. Live call failed
+    AWSConfig.set_last_live_call("failed")
+    html2 = web_client.get("/chat").text
+    header2 = re.search(r'<small id="header-planner-subtext"[^>]*>(.*?)</small>', html2, re.DOTALL).group(1)
+    assert "Supply Chain Planner" in header2
+    assert "Bedrock" not in header2
+
+    # 3. Successful live call occurred
+    AWSConfig.set_last_live_call("ok")
+    html3 = web_client.get("/chat").text
+    header3 = re.search(r'<small id="header-planner-subtext"[^>]*>(.*?)</small>', html3, re.DOTALL).group(1)
+    assert "Bedrock Planner" in header3
+    btn3 = re.search(r'<button class="chip-btn" id="chip-restock-btn"[^>]*>(.*?)</button>', html3, re.DOTALL).group(1)
+    assert "Bedrock" in btn3
+
+
+@pytest.mark.django_db(transaction=True)
 def test_chat_api_routing_greeting(web_client):
     """Verify greeting inputs return short hello and exactly 3 example questions."""
     for phrase in ["Hello", "vanakkam", "hi", "hey there"]:

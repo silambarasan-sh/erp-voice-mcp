@@ -12,15 +12,18 @@ from mcp_server.server import plan_erp_replenishment, confirm_action
 def reset_voice_sessions():
     """Ensure clean session state before and after each test."""
     VoiceSessionService.reset()
+    AWSConfig.set_last_live_call("not_called_yet")
     yield
     VoiceSessionService.reset()
+    AWSConfig.set_last_live_call("not_called_yet")
 
 
 def test_aws_config_defaults_and_env():
-    """Verify AWS region, model ID, and mock mode configuration."""
+    """Verify AWS region, model ID, mock mode, and last live call configuration."""
     assert AWSConfig.get_region() is not None
     assert "amazon" in AWSConfig.get_model_id().lower() or "claude" in AWSConfig.get_model_id().lower()
     assert AWSConfig.is_mock_mode() is True  # Default for testing/demo
+    assert AWSConfig.get_last_live_call() == "not_called_yet"
 
 
 @pytest.mark.django_db(transaction=True)
@@ -149,6 +152,7 @@ def test_planner_mode_bedrock_live_success(monkeypatch):
     assert result["data"]["bedrock_response_status"] == "end_turn"
     assert mock_client.converse.called is True
     assert "draft_id" in result["data"]
+    assert AWSConfig.get_last_live_call() == "ok"
 
 
 @pytest.mark.django_db(transaction=True)
@@ -175,6 +179,7 @@ def test_planner_mode_fallback_on_bedrock_error(monkeypatch, caplog):
     assert result["planner_mode"] == "fallback"
     assert result["data"]["planner_mode"] == "fallback"
     assert result["data"]["mock_mode"] is True
+    assert AWSConfig.get_last_live_call() == "failed"
 
     # 2. Verify error reason is present in both root and data
     assert error_msg in result["fallback_reason"]
@@ -222,7 +227,7 @@ def test_suggest_inference_profile():
 
 
 def test_check_bedrock_command_success(monkeypatch, capsys):
-    """Verify check_bedrock returns code 0 and prints latency and reply on success."""
+    """Verify check_bedrock returns code 0 and prints region, model, auth method, latency and reply."""
     from unittest.mock import MagicMock
     import boto3
     from aws_planner.check import check_bedrock
@@ -235,11 +240,15 @@ def test_check_bedrock_command_success(monkeypatch, capsys):
 
     exit_code = check_bedrock()
     assert exit_code == 0
+    assert AWSConfig.get_last_live_call() == "ok"
 
     captured = capsys.readouterr()
     assert "SUCCESS" in captured.out
     assert "Hello from Bedrock!" in captured.out
     assert "Latency" in captured.out
+    assert "Auth Method:" in captured.out
+    assert "Model ID" in captured.out
+    assert "AWS Region" in captured.out
 
 
 def test_check_bedrock_command_inference_profile_guidance(monkeypatch, capsys):
@@ -257,9 +266,32 @@ def test_check_bedrock_command_inference_profile_guidance(monkeypatch, capsys):
 
     exit_code = check_bedrock()
     assert exit_code == 1
+    assert AWSConfig.get_last_live_call() == "failed"
 
     captured = capsys.readouterr()
     assert "FAILED" in captured.out
     assert "us.amazon.nova-micro-v1:0" in captured.out
     assert "BEDROCK_MODEL_ID=us.amazon.nova-micro-v1:0" in captured.out
+
+
+def test_check_bedrock_command_scp_deny_guidance(monkeypatch, capsys):
+    """Verify check_bedrock provides clear guidance when SCP explicitly denies CallWithBearerToken."""
+    from unittest.mock import MagicMock
+    import boto3
+    from aws_planner.check import check_bedrock
+
+    mock_client = MagicMock()
+    mock_client.converse.side_effect = RuntimeError(
+        "User is not authorized to perform: bedrock:CallWithBearerToken with an explicit deny in a service control policy"
+    )
+    monkeypatch.setattr(boto3, "client", lambda *args, **kwargs: mock_client)
+
+    exit_code = check_bedrock()
+    assert exit_code == 1
+    assert AWSConfig.get_last_live_call() == "failed"
+
+    captured = capsys.readouterr()
+    assert "FAILED" in captured.out
+    assert "Service Control Policy" in captured.out or "SCP" in captured.out
+    assert "AmazonBedrockLimitedAccess" in captured.out
 

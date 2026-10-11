@@ -37,25 +37,42 @@ def suggest_inference_profile(model_id: str) -> str:
 
 def check_bedrock() -> int:
     """Make one lightweight Converse call to Amazon Bedrock and report status."""
+    # Ensure bearer token is not picked up if set in environment
+    os.environ.pop("AWS_BEARER_TOKEN_BEDROCK", None)
+
     region = AWSConfig.get_region()
     model_id = AWSConfig.get_model_id()
-    has_token = AWSConfig.has_bearer_token()
+
+    import boto3
+
+    # Inspect boto3 credential method safely without exposing secrets
+    auth_method = "Standard AWS credentials / IAM"
+    try:
+        session = boto3.Session(region_name=region)
+        creds = session.get_credentials()
+        if creds:
+            method_name = getattr(creds, "method", "")
+            if method_name == "env":
+                auth_method = "IAM User Access Key (AWS_ACCESS_KEY_ID via env)"
+            elif method_name in ("shared-credentials-file", "config-file", "config"):
+                auth_method = f"AWS CLI Profile / Credentials File ({method_name})"
+            elif method_name in ("iam-role", "assume-role", "ecs-container", "ec2-instance-metadata"):
+                auth_method = f"IAM Role ({method_name})"
+            elif method_name:
+                auth_method = f"IAM Credentials ({method_name})"
+    except Exception:
+        pass
 
     print("==================================================")
     print("       Amazon Bedrock Connectivity Check          ")
     print("==================================================")
     print(f"AWS Region : {region}")
     print(f"Model ID   : {model_id}")
-    if has_token:
-        print("Auth Method: AWS_BEARER_TOKEN_BEDROCK (configured, secret masked)")
-    else:
-        print("Auth Method: Standard AWS credentials / IAM")
+    print(f"Auth Method: {auth_method}")
     print("--------------------------------------------------")
     print("Sending test prompt: 'Say hello in one short sentence.' ...")
 
     try:
-        import boto3
-
         client = boto3.client("bedrock-runtime", region_name=region)
         start_time = time.time()
         response = client.converse(
@@ -71,6 +88,7 @@ def check_bedrock() -> int:
         latency = time.time() - start_time
         reply = response.get("output", {}).get("message", {}).get("content", [{}])[0].get("text", "").strip()
 
+        AWSConfig.set_last_live_call("ok")
         print("--------------------------------------------------")
         print("Status     : SUCCESS (200 OK)")
         print(f"Latency    : {latency:.2f}s")
@@ -79,6 +97,7 @@ def check_bedrock() -> int:
         return 0
 
     except Exception as exc:
+        AWSConfig.set_last_live_call("failed")
         err_msg = str(exc)
         exc_type = type(exc).__name__
 
@@ -100,11 +119,12 @@ def check_bedrock() -> int:
             print("To fix, set in your .env:")
             print(f"    BEDROCK_MODEL_ID={suggested_profile}")
 
-        elif "service control policy" in err_lower or "explicit deny" in err_lower:
+        elif "service control policy" in err_lower or "explicit deny" in err_lower or "callwithbearertoken" in err_lower:
             print("--------------------------------------------------")
             print("[!] ACTION REQUIRED: AWS Organizations Service Control Policy (SCP) Deny!")
-            print("The AWS Organizations SCP attached to this account explicitly denies")
-            print("'bedrock:CallWithBearerToken'. Contact your AWS administrator to allow this action.")
+            print("An AWS Organizations SCP attached to this account explicitly denied this action.")
+            print("Ensure bearer-token API keys are not used ('bedrock:CallWithBearerToken' is blocked) and that")
+            print("IAM credentials (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY) with AmazonBedrockLimitedAccess are used.")
 
         print("==================================================")
         return 1

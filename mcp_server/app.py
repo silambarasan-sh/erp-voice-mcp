@@ -55,20 +55,20 @@ async def chat_page(request: Request) -> HTMLResponse:
     """Serve the Alexa+ web chat simulator HTML page with mode-transparent labels."""
     if CHAT_HTML_PATH.exists():
         content = CHAT_HTML_PATH.read_text(encoding="utf-8")
-        is_live = not AWSConfig.is_mock_mode()
+        live_succeeded = (not AWSConfig.is_mock_mode()) and (AWSConfig.get_last_live_call() == "ok")
         header_subtext = (
             "Model Context Protocol &bull; Amazon Bedrock Planner"
-            if is_live
+            if live_succeeded
             else "Model Context Protocol &bull; Supply Chain Planner"
         )
         restock_label = (
             "⚡ Restock Fastest Supplier (Bedrock)"
-            if is_live
+            if live_succeeded
             else "⚡ Restock Fastest Supplier"
         )
         content = content.replace("<!--HEADER_PLANNER_SUBTEXT-->", header_subtext)
         content = content.replace("<!--RESTOCK_BUTTON_LABEL-->", restock_label)
-        content = content.replace("/*DEFAULT_IS_LIVE*/ false", f"/*DEFAULT_IS_LIVE*/ {'true' if is_live else 'false'}")
+        content = content.replace("/*DEFAULT_IS_LIVE*/ false", f"/*DEFAULT_IS_LIVE*/ {'true' if live_succeeded else 'false'}")
     else:
         content = "<h1>Alexa+ ERP Web Chat</h1><p>Template not found.</p>"
     return HTMLResponse(content)
@@ -329,6 +329,17 @@ async def health_check(request: Request) -> JSONResponse:
 
     db_ok = await sync_to_async(_check_db)()
 
+    configured_mode = "mock" if AWSConfig.is_mock_mode() else "bedrock"
+    last_live_call = AWSConfig.get_last_live_call()
+
+    # Never claim "bedrock" unless a live call has succeeded
+    if configured_mode == "bedrock" and last_live_call == "ok":
+        planner_mode = "bedrock"
+    elif last_live_call == "failed":
+        planner_mode = "fallback"
+    else:
+        planner_mode = "mock"
+
     return JSONResponse(
         {
             "status": "healthy",
@@ -341,7 +352,9 @@ async def health_check(request: Request) -> JSONResponse:
             "voice_assistant_target": "Alexa+",
             "web_chat_demo": "/chat",
             "aws_mock_mode": AWSConfig.is_mock_mode(),
-            "planner_mode": "mock" if AWSConfig.is_mock_mode() else "bedrock",
+            "configured_mode": configured_mode,
+            "last_live_call": last_live_call,
+            "planner_mode": planner_mode,
         }
     )
 

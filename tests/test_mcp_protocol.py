@@ -56,7 +56,10 @@ def test_registered_mcp_tools():
 
 @pytest.mark.django_db(transaction=True)
 def test_health_check_endpoint(test_client):
-    """Verify /health endpoint returns healthy status and 2025-11-25 spec version."""
+    """Verify /health endpoint returns healthy status, 2025-11-25 spec version, and mode transparency."""
+    from aws_planner.config import AWSConfig
+    AWSConfig.set_last_live_call("not_called_yet")
+
     response = test_client.get("/health")
     assert response.status_code == 200
     data = response.json()
@@ -65,9 +68,43 @@ def test_health_check_endpoint(test_client):
     assert data["transport"] == "streamable_http"
     assert data["database_connected"] is True
     assert data["mcp_endpoint"] == "/mcp"
+    assert data["configured_mode"] == "mock"
+    assert data["last_live_call"] == "not_called_yet"
+    assert data["planner_mode"] == "mock"
 
     # Verify protocol version response header
     assert response.headers.get("mcp-protocol-version") == "2025-11-25"
+
+
+@pytest.mark.django_db(transaction=True)
+def test_health_check_endpoint_never_claims_bedrock_without_successful_live_call(test_client, monkeypatch):
+    """Verify /health never reports planner_mode 'bedrock' unless a live call has succeeded."""
+    from aws_planner.config import AWSConfig
+
+    monkeypatch.setenv("AWS_MOCK_MODE", "false")
+
+    # 1. Configured mode is bedrock, but no live call has occurred yet
+    AWSConfig.set_last_live_call("not_called_yet")
+    res1 = test_client.get("/health").json()
+    assert res1["configured_mode"] == "bedrock"
+    assert res1["last_live_call"] == "not_called_yet"
+    assert res1["planner_mode"] != "bedrock"
+    assert res1["planner_mode"] == "mock"
+
+    # 2. Live call was attempted but failed
+    AWSConfig.set_last_live_call("failed")
+    res2 = test_client.get("/health").json()
+    assert res2["configured_mode"] == "bedrock"
+    assert res2["last_live_call"] == "failed"
+    assert res2["planner_mode"] != "bedrock"
+    assert res2["planner_mode"] == "fallback"
+
+    # 3. Only when last live call succeeded can planner_mode claim 'bedrock'
+    AWSConfig.set_last_live_call("ok")
+    res3 = test_client.get("/health").json()
+    assert res3["configured_mode"] == "bedrock"
+    assert res3["last_live_call"] == "ok"
+    assert res3["planner_mode"] == "bedrock"
 
 
 @pytest.mark.django_db(transaction=True)
