@@ -249,7 +249,7 @@ async def confirm_action(session_id: str = "default") -> Dict[str, Any]:
 
 
 # ============================================================================
-# AWS Builder Layer: Amazon Bedrock & Strands ERP Planner Agent
+# AWS Builder Layer: Amazon Bedrock Converse ERP Planner Agent
 # ============================================================================
 
 @mcp_server.tool()
@@ -257,7 +257,7 @@ async def plan_erp_replenishment(
     prompt: str,
     session_id: str = "default",
 ) -> Dict[str, Any]:
-    """Use Amazon Bedrock and Strands Agents SDK to plan multi-step ERP replenishment.
+    """Use Amazon Bedrock Converse tool use to plan multi-step ERP replenishment.
 
     Processes natural language instructions such as 'Restock everything that's running low from the fastest supplier'.
     Analyzes warehouse inventory, evaluates supplier lead times, drafts purchase orders in SQLite, and stages them for confirmation.

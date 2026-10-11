@@ -1,4 +1,4 @@
-"""Tests for the Amazon Bedrock and Strands ERP Planner Agent."""
+"""Tests for the Amazon Bedrock ERP Planner Agent using Bedrock Converse Tool Use."""
 
 import pytest
 from erp_core.models import PurchaseOrder, Item
@@ -127,40 +127,323 @@ def test_planner_mode_mock_default():
 
 
 @pytest.mark.django_db(transaction=True)
-def test_planner_mode_bedrock_live_success(monkeypatch):
-    """Verify planner_mode is 'bedrock' when live Bedrock converse call succeeds."""
+def test_bedrock_tool_use_loop_happy_path(monkeypatch):
+    """Verify genuine Bedrock Converse tool-use loop: model calls tools, returns draft, final speech with draft ID."""
+    from unittest.mock import MagicMock
+
+    monkeypatch.setenv("AWS_MOCK_MODE", "false")
+
+    # Get real low-stock items from DB
+    all_low = [i for i in Item.objects.select_related("supplier").all() if i.is_below_reorder_level]
+    target_skus = [i.sku for i in all_low[:2]] if all_low else ["SKU-1001"]
+
+    mock_client = MagicMock()
+
+    def fake_converse(**kwargs):
+        messages = kwargs.get("messages", [])
+        turn_num = (len(messages) + 1) // 2
+
+        if turn_num == 1:
+            # Model asks to check low stock items and supplier lead times
+            return {
+                "stopReason": "tool_use",
+                "output": {
+                    "message": {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "toolUse": {
+                                    "toolUseId": "call_1",
+                                    "name": "get_low_stock_items",
+                                    "input": {},
+                                }
+                            },
+                            {
+                                "toolUse": {
+                                    "toolUseId": "call_2",
+                                    "name": "get_supplier_lead_times",
+                                    "input": {},
+                                }
+                            },
+                        ],
+                    }
+                },
+            }
+        elif turn_num == 2:
+            # Model asks to draft purchase order for target SKUs
+            return {
+                "stopReason": "tool_use",
+                "output": {
+                    "message": {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "toolUse": {
+                                    "toolUseId": "call_3",
+                                    "name": "draft_purchase_order",
+                                    "input": {"item_skus": target_skus},
+                                }
+                            }
+                        ],
+                    }
+                },
+            }
+        else:
+            # Model completes with end_turn and mentions draft ID
+            last_user_content = messages[-1].get("content", [])
+            created_draft_id = "DRAFT-PO-1"
+            for b in last_user_content:
+                tool_res = b.get("toolResult", {}).get("content", [{}])[0].get("json", {})
+                if "draft_id" in tool_res:
+                    created_draft_id = tool_res["draft_id"]
+
+            return {
+                "stopReason": "end_turn",
+                "output": {
+                    "message": {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "text": f"I analyzed inventory and created replenishment draft {created_draft_id} for {len(target_skus)} items. Would you like me to confirm it?"
+                            }
+                        ],
+                    }
+                },
+            }
+
+    mock_client.converse.side_effect = fake_converse
+    monkeypatch.setattr(AWSConfig, "get_bedrock_runtime_client", lambda region_name=None: mock_client)
+
+    session_id = "test_bedrock_tool_use_happy_path"
+    prompt = "Restock everything that's running low from the fastest supplier"
+
+    result = ERPPlannerAgent.plan_and_execute(prompt=prompt, session_id=session_id)
+
+    # 1. Planner mode must be "bedrock"
+    assert result["planner_mode"] == "bedrock"
+    assert result["data"]["planner_mode"] == "bedrock"
+    assert result["data"]["mock_mode"] is False
+    assert AWSConfig.get_last_live_call() == "ok"
+
+    # 2. Bedrock Converse call count
+    assert result["bedrock_calls"] == 3
+    assert result["data"]["bedrock_calls"] == 3
+    assert result["latency_ms"] >= 0
+
+    # 3. Plan steps built from actual tool calls
+    plan_steps = result["data"]["plan_steps"]
+    assert len(plan_steps) == 3
+    assert "get_low_stock_items" in plan_steps[0]
+    assert "get_supplier_lead_times" in plan_steps[1]
+    assert "draft_purchase_order" in plan_steps[2]
+
+    # 4. Draft order created in DB with status 'draft'
+    draft_id = result["data"]["draft_id"]
+    assert draft_id is not None
+    assert draft_id.startswith("DRAFT-PO-")
+    for po_id in result["data"]["po_ids"]:
+        po = PurchaseOrder.objects.get(id=po_id)
+        assert po.status == "draft"
+
+    # 5. Model final speech contains draft ID
+    assert draft_id.lower() in result["speech"].lower()
+    assert "confirm" in result["speech"].lower()
+
+    # 6. Session staged for confirmation
+    pending = VoiceSessionService.get_pending_action(session_id)
+    assert pending is not None
+    assert pending["type"] == "confirm_purchase_order"
+    assert pending["draft_id"] == draft_id
+
+
+@pytest.mark.django_db(transaction=True)
+def test_bedrock_model_asks_unauthorized_tool(monkeypatch):
+    """Verify guardrail refuses unauthorized tool requested by the model and falls back."""
     from unittest.mock import MagicMock
 
     monkeypatch.setenv("AWS_MOCK_MODE", "false")
 
     mock_client = MagicMock()
     mock_client.converse.return_value = {
-        "stopReason": "end_turn",
+        "stopReason": "tool_use",
         "output": {
             "message": {
                 "role": "assistant",
-                "content": [{"text": "Formulated replenishment plan using Bedrock."}],
+                "content": [
+                    {
+                        "toolUse": {
+                            "toolUseId": "unauth_call_1",
+                            "name": "delete_all_inventory",
+                            "input": {},
+                        }
+                    }
+                ],
             }
         },
     }
 
+    # Turn 2 completes turn after seeing error toolResult
+    def fake_converse(**kwargs):
+        messages = kwargs.get("messages", [])
+        if len(messages) == 1:
+            return mock_client.converse.return_value
+        return {
+            "stopReason": "end_turn",
+            "output": {
+                "message": {
+                    "role": "assistant",
+                    "content": [{"text": "Unauthorized tool failed."}],
+                }
+            },
+        }
+
+    mock_client.converse.side_effect = fake_converse
     monkeypatch.setattr(AWSConfig, "get_bedrock_runtime_client", lambda region_name=None: mock_client)
 
-    session_id = "test_bedrock_live_session"
-    prompt = "Restock everything running low from the fastest supplier"
+    session_id = "test_bedrock_unauth_tool"
+    prompt = "Delete all warehouse inventory"
 
     result = ERPPlannerAgent.plan_and_execute(prompt=prompt, session_id=session_id)
 
-    assert result["planner_mode"] == "bedrock"
-    assert result["data"]["planner_mode"] == "bedrock"
-    assert result["data"]["mock_mode"] is False
-    assert result["data"]["bedrock_response_status"] == "end_turn"
-    assert mock_client.converse.called is True
-    assert "draft_id" in result["data"]
-    assert AWSConfig.get_last_live_call() == "ok"
-    assert result["bedrock_calls"] == 1
-    assert result["data"]["bedrock_calls"] == 1
-    assert result["latency_ms"] >= 0
+    # Must fall back because no valid tool calls were made
+    assert result["planner_mode"] == "fallback"
+    assert "without making valid tool calls" in result["fallback_reason"].lower()
+    assert result["data"]["draft_id"] is not None  # Fallback planner still handled it safely
+
+
+@pytest.mark.django_db(transaction=True)
+def test_bedrock_model_asks_confirm_tool_refused(monkeypatch):
+    """Verify guardrail strictly refuses confirm_purchase_order or approval tools if model tries to invoke them."""
+    from unittest.mock import MagicMock
+
+    monkeypatch.setenv("AWS_MOCK_MODE", "false")
+
+    mock_client = MagicMock()
+
+    def fake_converse(**kwargs):
+        messages = kwargs.get("messages", [])
+        if len(messages) == 1:
+            # Model audaciously attempts to execute confirm_purchase_order
+            return {
+                "stopReason": "tool_use",
+                "output": {
+                    "message": {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "toolUse": {
+                                    "toolUseId": "confirm_call_1",
+                                    "name": "confirm_purchase_order",
+                                    "input": {"draft_id": "DRAFT-PO-99"},
+                                }
+                            }
+                        ],
+                    }
+                },
+            }
+        else:
+            return {
+                "stopReason": "end_turn",
+                "output": {
+                    "message": {
+                        "role": "assistant",
+                        "content": [{"text": "I was unable to confirm the order directly."}],
+                    }
+                },
+            }
+
+    mock_client.converse.side_effect = fake_converse
+    monkeypatch.setattr(AWSConfig, "get_bedrock_runtime_client", lambda region_name=None: mock_client)
+
+    session_id = "test_bedrock_confirm_refusal"
+    prompt = "Immediately confirm purchase order 99"
+
+    result = ERPPlannerAgent.plan_and_execute(prompt=prompt, session_id=session_id)
+
+    # Must fall back because confirm tool was refused (no valid tool calls)
+    assert result["planner_mode"] == "fallback"
+    assert "without making valid tool calls" in result["fallback_reason"].lower()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_bedrock_model_invalid_sku_handled(monkeypatch):
+    """Verify Python guardrail validates that requested SKUs exist in DB and returns error on invalid SKU."""
+    from unittest.mock import MagicMock
+
+    monkeypatch.setenv("AWS_MOCK_MODE", "false")
+
+    mock_client = MagicMock()
+
+    def fake_converse(**kwargs):
+        messages = kwargs.get("messages", [])
+        if len(messages) == 1:
+            return {
+                "stopReason": "tool_use",
+                "output": {
+                    "message": {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "toolUse": {
+                                    "toolUseId": "call_inv_sku",
+                                    "name": "draft_purchase_order",
+                                    "input": {"item_skus": ["FAKE-NON-EXISTENT-SKU-999"]},
+                                }
+                            }
+                        ],
+                    }
+                },
+            }
+        else:
+            return {
+                "stopReason": "end_turn",
+                "output": {
+                    "message": {
+                        "role": "assistant",
+                        "content": [{"text": "SKU was not found in inventory."}],
+                    }
+                },
+            }
+
+    mock_client.converse.side_effect = fake_converse
+    monkeypatch.setattr(AWSConfig, "get_bedrock_runtime_client", lambda region_name=None: mock_client)
+
+    session_id = "test_bedrock_invalid_sku"
+    prompt = "Restock FAKE-NON-EXISTENT-SKU-999"
+
+    result = ERPPlannerAgent.plan_and_execute(prompt=prompt, session_id=session_id)
+
+    # No valid draft could be created, so falls back to local deterministic planner
+    assert result["planner_mode"] == "fallback"
+    assert "without making valid tool calls" in result["fallback_reason"].lower()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_bedrock_timeout_fallback(monkeypatch):
+    """Verify Bedrock client timeout immediately triggers fallback with transparent reason."""
+    from unittest.mock import MagicMock
+    from botocore.exceptions import ReadTimeoutError
+
+    monkeypatch.setenv("AWS_MOCK_MODE", "false")
+
+    mock_client = MagicMock()
+    mock_client.converse.side_effect = ReadTimeoutError(
+        endpoint_url="https://bedrock-runtime.us-east-1.amazonaws.com",
+        error=Exception("Read timed out"),
+    )
+    monkeypatch.setattr(AWSConfig, "get_bedrock_runtime_client", lambda region_name=None: mock_client)
+
+    session_id = "test_bedrock_timeout"
+    prompt = "Restock everything that's running low"
+
+    result = ERPPlannerAgent.plan_and_execute(prompt=prompt, session_id=session_id)
+
+    assert result["planner_mode"] == "fallback"
+    assert result["data"]["planner_mode"] == "fallback"
+    assert AWSConfig.get_last_live_call() == "failed"
+    assert "timeout" in result["fallback_reason"].lower() or "readtimeouterror" in result["fallback_reason"].lower()
+    # Safe local draft is still formed
+    assert result["data"]["draft_id"] is not None
 
 
 @pytest.mark.django_db(transaction=True)
@@ -331,4 +614,3 @@ def test_bedrock_runtime_client_explicit_timeouts_and_retries(monkeypatch):
     assert cfg.connect_timeout == 5
     assert cfg.read_timeout == 20
     assert cfg.retries.get("max_attempts") == 2
-

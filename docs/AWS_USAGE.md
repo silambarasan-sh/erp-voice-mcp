@@ -68,26 +68,31 @@ The codebase interacts directly with **Amazon Bedrock** via the AWS SDK for Pyth
 When `AWS_MOCK_MODE=False` and an executive speaks a replenishment request such as:
 > *"Restock everything that's running low from the fastest supplier"*
 
-The agent executes a live Converse call:
+The agent executes a multi-turn Amazon Bedrock Converse tool-use loop:
 
-1. **Client Initialization**: Initializes `boto3.client("bedrock-runtime", region_name=AWSConfig.get_region())`.
-2. **Converse Invocation**:
-   ```python
-   response = client.converse(
-       modelId=AWSConfig.get_model_id(),
-       system=[{"text": "You are an ERP Supply Chain Planner Agent. You analyze warehouse stock, optimize supplier lead times, and formulate replenishment purchase order plans. Always adhere to the confirmation principle: never confirm without user approval."}],
-       messages=[{"role": "user", "content": [{"text": prompt}]}],
-       inferenceConfig={"temperature": 0.2, "maxTokens": 500},
-   )
-   ```
-3. **Structured Plan Formulation**:
-   - Queries inventory to identify items at or below reorder levels.
-   - Evaluates suppliers to pick the fastest vendor by lead time.
-   - Creates real draft purchase orders (`DRAFT-PO-4`) in SQLite via `VoiceERPToolsService.draft_purchase_order()`.
-   - Records Bedrock response metadata (`bedrock_response_status: response["stopReason"]`).
-4. **Transparent Badge & UI**:
-   - Sets `planner_mode: "bedrock"`.
-   - The Web Chat UI renders the emerald **`Bedrock (live)`** badge.
+1. **Client Initialization**: Initializes `boto3.client("bedrock-runtime", region_name=AWSConfig.get_region(), config=Config(connect_timeout=5, read_timeout=20, retries={"max_attempts": 1}))`.
+2. **Converse Tool Configuration (`toolConfig`)**:
+   Provides the model **strictly** with three read/draft tools:
+   - `get_low_stock_items`: Inspects warehouse inventory for items at or below reorder levels.
+   - `get_supplier_lead_times`: Lists suppliers ordered by lead time (in days) to find the fastest vendor.
+   - `draft_purchase_order(item_skus)`: Formulates a draft purchase order for specified SKUs.
+   *Crucial Safety Invariant*: Confirmation tools (`confirm_purchase_order`, `approve_leave`, `reject_leave`) are **never** exposed to the model.
+3. **Autonomous Reasoning & Multi-Turn Tool Execution (Up to 5 Iterations)**:
+   - Bedrock inspects low stock items and evaluates supplier lead times.
+   - Bedrock decides which items to order and selects the fastest supplier, requesting `draft_purchase_order(item_skus=...)`.
+   - **Strict Python Guardrails** (enforced in Python, not prompt):
+     - Validates that all requested SKUs exist in inventory.
+     - Caps order quantity per line item (`MAX_QTY_PER_ITEM = 100`) to prevent unbounded orders.
+     - Enforces status strictly as `'draft'`.
+     - Stages the draft in `VoiceSessionService` awaiting explicit user confirmation.
+   - MCP returns `toolResult` blocks back to Bedrock Converse.
+4. **Model-Driven Plan & Final Speech**:
+   - `plan_steps` is constructed directly from the actual tool calls executed by the model.
+   - Spoken summary is derived from the model's final response (which must mention the draft ID, e.g., `DRAFT-PO-4`).
+   - Reports `planner_mode: "bedrock"` only when the model has made valid tool calls.
+5. **Human-in-the-Loop Confirmation**:
+   - The system awaits explicit user voice confirmation ("Confirm it").
+   - Confirmation is executed strictly by human approval via `confirm_action()`.
 
 ```mermaid
 sequenceDiagram
@@ -95,22 +100,26 @@ sequenceDiagram
     actor User as Executive (Alexa+)
     participant MCP as MCP Server (/mcp)
     participant Bedrock as Amazon Bedrock (Converse API)
-    participant ERP as ERP Database (Django)
+    participant ERP as ERP Core (Django 5)
     participant Session as VoiceSessionService
 
     User->>MCP: "Restock everything that's running low from the fastest supplier"
-    MCP->>Bedrock: client.converse(modelId, messages=[prompt])
-    Bedrock-->>MCP: Bedrock Converse response (stopReason: "end_turn")
-    MCP->>ERP: Query low stock items & supplier lead times
-    ERP-->>MCP: Returns low-stock items with lead times
-    Note over MCP: Identifies fastest supplier: Reliance (4 days).
-    MCP->>ERP: draft_purchase_order(status="draft")
-    ERP-->>MCP: Creates DRAFT PO (ID: DRAFT-PO-4)
-    MCP->>Session: Stages DRAFT-PO-4 for confirmation
-    MCP-->>User: "Reliance Industrial Polymers is the fastest supplier (4-day lead time). I drafted order DRAFT-PO-4 for 2 items. Would you like me to confirm it?"
+    MCP->>Bedrock: client.converse(messages=[prompt], toolConfig=[get_low_stock_items, get_supplier_lead_times, draft_purchase_order])
+    Bedrock-->>MCP: toolUse: get_low_stock_items, get_supplier_lead_times
+    MCP->>ERP: Query inventory below reorder level & supplier lead times
+    ERP-->>MCP: Low stock items & lead times
+    MCP->>Bedrock: toolResult: items & supplier lead times
+    Bedrock-->>MCP: toolUse: draft_purchase_order(item_skus=["SKU-1001", ...])
+    Note over MCP: Python Guardrails: validate SKUs, cap qty (<=100), draft status only
+    MCP->>ERP: Create DRAFT Purchase Orders (DRAFT-PO-4)
+    ERP-->>MCP: Draft PO created
+    MCP->>Session: Stages DRAFT-PO-4 for human confirmation
+    MCP->>Bedrock: toolResult: success, draft_id="DRAFT-PO-4"
+    Bedrock-->>MCP: Final response: "I reviewed low stock items... drafted order DRAFT-PO-4. Would you like me to confirm it?" (stopReason: "end_turn")
+    MCP-->>User: Spoken plan summary with DRAFT-PO-4 & Bedrock tool-trace card
     User->>MCP: "Confirm it"
     MCP->>ERP: confirm_action() -> changes status to confirmed
-    ERP-->>User: "Purchase order DRAFT-PO-4 for Reliance Industrial Polymers has been confirmed."
+    ERP-->>User: "Purchase order DRAFT-PO-4 has been confirmed."
 ```
 
 ---
