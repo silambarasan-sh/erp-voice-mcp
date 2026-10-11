@@ -694,7 +694,7 @@
       const restockBtn = document.getElementById("chip-restock-btn");
       if (mode === "bedrock") {
         isLiveMode = true;
-        if (headerSubtext) headerSubtext.innerHTML = "Model Context Protocol &bull; Amazon Bedrock Planner (Live)";
+        if (headerSubtext) headerSubtext.innerHTML = "Model Context Protocol &bull; Amazon Bedrock Planner";
         if (restockBtn) restockBtn.textContent = "⚡ Restock Fastest Supplier (Bedrock)";
       } else {
         isLiveMode = false;
@@ -1123,6 +1123,36 @@
             </div>
             ${fallbackAlert}
             <div class="step-timeline">${steps}</div>
+            ${(data.tool_traces && Array.isArray(data.tool_traces) && data.tool_traces.length > 0) ? `
+              <details style="margin-top: 12px; background: rgba(0,0,0,0.3); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 8px 12px; font-size: 0.8rem;">
+                <summary style="cursor: pointer; font-weight: 600; color: var(--alexa-cyan); user-select: none;">
+                  🔍 What the model did (${data.tool_traces.length} tool call${data.tool_traces.length > 1 ? 's' : ''})
+                </summary>
+                <div style="margin-top: 8px; display: flex; flex-direction: column; gap: 6px;">
+                  ${data.tool_traces.map(t => {
+                    const toolName = escapeHtml(t.tool || 'tool');
+                    const argsStr = escapeHtml(JSON.stringify(t.arguments || {}));
+                    let resStr = 'success';
+                    if (t.result) {
+                      if (t.result.error) {
+                        resStr = 'Error: ' + t.result.error;
+                      } else if (t.result.draft_id) {
+                        resStr = 'Created ' + t.result.draft_id + ' (' + (t.result.items_count || 1) + ' items, Qty: ' + (t.result.total_quantity || '') + ')';
+                      } else if (t.result.count !== undefined) {
+                        resStr = 'Found ' + t.result.count + ' records';
+                      } else {
+                        resStr = JSON.stringify(t.result).slice(0, 70);
+                      }
+                    }
+                    return `
+                      <div style="background: rgba(255,255,255,0.03); padding: 6px 8px; border-radius: 4px; font-family: monospace; font-size: 0.73rem;">
+                        <strong style="color: #10B981;">${toolName}</strong>(${argsStr}) &rarr; <span style="color: var(--text-muted);">${escapeHtml(resStr)}</span>
+                      </div>
+                    `;
+                  }).join('')}
+                </div>
+              </details>
+            ` : ''}
             <div style="margin-top: 14px; display:flex; gap: 10px; align-items:center;">
               ${data.draft_id ? `
                 <button class="btn-action-primary" onclick="confirmPurchaseOrder('${escapeHtml(data.draft_id)}')">

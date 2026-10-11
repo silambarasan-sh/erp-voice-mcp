@@ -14,12 +14,69 @@ logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = (
     "You are an ERP Supply Chain Planner Agent. You help users plan inventory replenishment. "
-    "You have access to tools to inspect low stock items, check supplier lead times, and create draft purchase orders. "
-    "Always use the available tools to inspect inventory and formulate replenishment orders. "
-    "You can ONLY create DRAFT orders. You CANNOT and MUST NOT confirm orders or execute final approvals; "
-    "confirmation is strictly reserved for the human operator. "
-    "When you finish creating the draft, formulate a clear, concise spoken summary stating the draft ID and asking the user if they would like to confirm it."
+    "When instructed to restock running low items from the fastest supplier: "
+    "1. Call get_low_stock_items to inspect warehouse inventory at or below reorder levels. "
+    "2. Call get_supplier_lead_times to evaluate supplier lead times. "
+    "3. Identify which suppliers provide the low-stock items, and pick the single supplier with the SHORTEST lead time among those low-stock suppliers. "
+    "4. Call draft_purchase_order exactly ONCE containing all low-stock item SKUs for that chosen fastest supplier. You must NEVER mix SKUs from multiple suppliers in a single draft call, and you must NOT call draft_purchase_order a second time. "
+    "5. Formulate your final response in plain text: exactly 2 sentences, strictly under 45 words, no markdown, no asterisks, no lists. State the draft ID, supplier name, lead time, item count, and mention how many other low-stock items remain from slower suppliers. "
+    "Safety invariant: You can ONLY create DRAFT orders. You CANNOT confirm orders or approve leaves; confirmation is strictly a human step."
 )
+
+
+def build_voice_speech(
+    model_text: str,
+    draft_id: Optional[str],
+    supplier_name: Optional[str],
+    lead_time_days: Optional[int],
+    item_count: int,
+    other_low_count: int,
+) -> str:
+    """Produce plain text voice speech adhering to: 2 sentences, under 45 words, no markdown, no asterisks, no lists."""
+    if not draft_id or not supplier_name:
+        return "All inventory items are currently well-stocked above reorder levels. No purchase orders are needed."
+
+    # Build reliable deterministic template speech from real tool results
+    other_phrase = (
+        f"{other_low_count} other {'item remains' if other_low_count == 1 else 'items remain'} low from slower suppliers"
+        if other_low_count > 0
+        else "All other items are well-stocked"
+    )
+    fallback_speech = (
+        f"I created draft {draft_id} for {item_count} items from {supplier_name} with a {lead_time_days}-day lead time. "
+        f"{other_phrase}; would you like to confirm?"
+    )
+
+    if not model_text:
+        return fallback_speech
+
+    # Remove thinking tags
+    clean_text = re.sub(r"<thinking>.*?</thinking>", "", model_text, flags=re.DOTALL).strip()
+
+    # Reject if original text has markdown indicators (asterisks, bullet points, headers, numbered lists)
+    has_markdown = bool(re.search(r"[*#_`\[\]]|\n\s*[-+*•]|\n\s*\d+\.", clean_text))
+    if has_markdown:
+        return fallback_speech
+
+    # Clean whitespace and strip any stray markdown characters
+    clean_text = re.sub(r"[*#_`\[\]]", "", clean_text)
+    clean_text = " ".join(clean_text.split()).strip()
+
+    # Validate draft_id is present
+    if draft_id.lower() not in clean_text.lower():
+        return fallback_speech
+
+    # Validate word count (strictly under 45 words)
+    words = clean_text.split()
+    if len(words) >= 45:
+        return fallback_speech
+
+    # Validate exactly 2 sentences
+    sentence_endings = [m.start() for m in re.finditer(r"[.!?](?:\s|$)", clean_text)]
+    if len(sentence_endings) != 2:
+        return fallback_speech
+
+    return clean_text
 
 
 class ERPPlannerAgent:
@@ -60,6 +117,10 @@ class ERPPlannerAgent:
         cleaned_prompt = prompt.lower().strip()
         plan_steps: List[str] = []
 
+        # Reset draft creation tracker for this session request
+        session = VoiceSessionService.get_session(session_id)
+        session["planner_draft_created"] = False
+
         # Step 1: Query inventory for low-stock items
         all_items = list(Item.objects.select_related("supplier").all())
         low_stock_items = [i for i in all_items if i.is_below_reorder_level]
@@ -67,11 +128,7 @@ class ERPPlannerAgent:
             f"Step 1: Queried warehouse inventory. Found {len(low_stock_items)} items currently at or below reorder levels."
         )
 
-        planner_title = (
-            "Amazon Bedrock ERP Planner (AWS Builder Challenge)"
-            if planner_mode == "bedrock"
-            else "ERP Supply Chain Planner"
-        )
+        planner_title = "Amazon Bedrock ERP Planner"
 
         effective_latency_ms = (
             latency_ms if latency_ms is not None else int((time.time() - mock_start) * 1000)
@@ -166,18 +223,22 @@ class ERPPlannerAgent:
             f"Step 4: Staged draft {draft_id} in session '{session_id}' awaiting explicit user confirmation."
         )
 
-        # Generate voice speech for Alexa+
+        # Generate voice speech (strictly 2 sentences, under 45 words, plain text)
+        other_low_count = max(0, len(low_stock_items) - len(target_items))
         if selected_supplier_info:
-            speech = (
-                f"I reviewed low stock items. {selected_supplier_info['name']} is the fastest supplier "
-                f"with a {selected_supplier_info['lead_time_days']}-day lead time. "
-                f"I drafted order {draft_id} for {len(target_items)} items. Would you like me to confirm it?"
+            speech = build_voice_speech(
+                model_text="",
+                draft_id=draft_id,
+                supplier_name=selected_supplier_info["name"],
+                lead_time_days=selected_supplier_info["lead_time_days"],
+                item_count=len(target_items),
+                other_low_count=other_low_count,
             )
         else:
             sup_str = ", ".join(supplier_names[:2])
             speech = (
-                f"I have created replenishment draft {draft_id} for {len(target_items)} low stock items "
-                f"from {sup_str}. Total quantity is {total_qty}. Would you like me to confirm it?"
+                f"I created replenishment draft {draft_id} for {len(target_items)} items from {sup_str}. "
+                f"Total quantity is {total_qty}; would you like me to confirm?"
             )
 
         data_payload = {
@@ -243,6 +304,10 @@ class ERPPlannerAgent:
         """Invoke Amazon Bedrock Foundation Model via Converse API tool-use loop."""
         start_time = time.time()
         bedrock_calls = 0
+
+        # Reset draft creation tracker for this session request
+        session = VoiceSessionService.get_session(session_id)
+        session["planner_draft_created"] = False
 
         try:
             client = AWSConfig.get_bedrock_runtime_client()
@@ -347,7 +412,7 @@ class ERPPlannerAgent:
 
             total_latency_ms = int((time.time() - start_time) * 1000)
 
-            # Guardrail requirement 4 & 5: Model must have made at least one valid tool call
+            # Guardrail: Model must have made at least one valid tool call
             if valid_tool_calls_made == 0:
                 logger.warning(
                     "Bedrock model completed without making valid tool calls. Falling back to local deterministic planner."
@@ -364,38 +429,27 @@ class ERPPlannerAgent:
             # Bedrock successfully planned with genuine tool use
             AWSConfig.set_last_live_call("ok")
 
-            # Determine speech: model final message must include draft_id if draft was created
-            draft_id = last_draft_details.get("draft_id") if last_draft_details else None
-            cleaned_speech = re.sub(r"<thinking>.*?</thinking>", "", model_final_speech, flags=re.DOTALL).strip()
+            # Calculate total low-stock items in DB to compute remaining items accurately
+            all_low_items = [i for i in Item.objects.select_related("supplier").all() if i.is_below_reorder_level]
+            total_low_stock_count = len(all_low_items)
 
-            if draft_id and (draft_id.lower() in cleaned_speech.lower()):
-                final_speech = cleaned_speech
-            elif last_draft_details:
-                fastest_sup = last_draft_details.get("fastest_supplier")
-                items_cnt = last_draft_details.get("items_count", 0)
-                qty = last_draft_details.get("total_quantity", 0)
-                suppliers = last_draft_details.get("suppliers", [])
-                sup_str = ", ".join(suppliers[:2])
-                if fastest_sup:
-                    final_speech = (
-                        f"I reviewed low stock items. {fastest_sup['name']} is the fastest supplier "
-                        f"with a {fastest_sup['lead_time_days']}-day lead time. "
-                        f"I drafted order {draft_id} for {items_cnt} items. Would you like me to confirm it?"
-                    )
-                else:
-                    final_speech = (
-                        f"I have created replenishment draft {draft_id} for {items_cnt} low stock items "
-                        f"from {sup_str}. Total quantity is {qty}. Would you like me to confirm it?"
-                    )
-            elif cleaned_speech:
-                final_speech = cleaned_speech
-            else:
-                final_speech = (
-                    "All inventory items are currently well-stocked above reorder levels. No purchase orders are needed."
-                )
+            draft_id = last_draft_details.get("draft_id") if last_draft_details else None
+            fastest_sup = last_draft_details.get("fastest_supplier") if last_draft_details else None
+            items_in_draft = last_draft_details.get("items_count", 0) if last_draft_details else 0
+            other_low_count = max(0, total_low_stock_count - items_in_draft)
+
+            # Build concise 2-sentence plain text voice speech (< 45 words, no markdown)
+            final_speech = build_voice_speech(
+                model_text=model_final_speech,
+                draft_id=draft_id,
+                supplier_name=fastest_sup["name"] if fastest_sup else None,
+                lead_time_days=fastest_sup["lead_time_days"] if fastest_sup else None,
+                item_count=items_in_draft,
+                other_low_count=other_low_count,
+            )
 
             data_payload = {
-                "planner": "Amazon Bedrock ERP Planner (AWS Builder Challenge)",
+                "planner": "Amazon Bedrock ERP Planner",
                 "model_id": model_id,
                 "aws_region": AWSConfig.get_region(),
                 "mock_mode": False,
@@ -408,11 +462,11 @@ class ERPPlannerAgent:
                 "draft_id": draft_id,
                 "status": "draft" if last_draft_details else "none_needed",
                 "requires_confirmation": bool(last_draft_details),
-                "fastest_supplier": last_draft_details.get("fastest_supplier") if last_draft_details else None,
+                "fastest_supplier": fastest_sup,
                 "po_count": len(last_draft_details.get("po_ids", [])) if last_draft_details else 0,
                 "po_ids": last_draft_details.get("po_ids", []) if last_draft_details else [],
                 "suppliers": last_draft_details.get("suppliers", []) if last_draft_details else [],
-                "items_count": last_draft_details.get("items_count", 0) if last_draft_details else 0,
+                "items_count": items_in_draft,
                 "total_quantity": last_draft_details.get("total_quantity", 0) if last_draft_details else 0,
                 "items": last_draft_details.get("items", []) if last_draft_details else [],
             }

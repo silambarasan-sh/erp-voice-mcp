@@ -7,7 +7,7 @@
 [![MCP Spec](https://img.shields.io/badge/MCP%20Spec-2025--11--25-blue.svg)](https://modelcontextprotocol.io)
 [![Django](https://img.shields.io/badge/Django-5.2-green.svg)](https://www.djangoproject.com/)
 [![AWS Bedrock](https://img.shields.io/badge/AWS-Amazon%20Bedrock-orange.svg)](docs/AWS_USAGE.md)
-[![Tests](https://img.shields.io/badge/pytest-85%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/pytest-98%20passed-brightgreen.svg)]()
 [![Package](https://img.shields.io/badge/Package-django--erp--mcp-purple.svg)](django-erp-mcp/)
 
 
@@ -23,7 +23,7 @@
 1. **Voice-First ERP Queries**: Delivers concise, speech-friendly spoken answers formatted for text-to-speech engines (Alexa+), paired with rich structured data payloads for dashboards.
 2. **Conversational Session Memory**: Remembers context across turns—allowing natural executive follow-up questions such as *"and who are the top 3 customers for that?"* or *"confirm it"*.
 3. **Ask-Then-Confirm Safety Guarantee**: Never modifies mission-critical business data without explicit user confirmation. Drafts are safely staged in session memory until the user explicitly says *"Confirm it"*.
-4. **AWS Builder Layer (Amazon Bedrock)**: Autonomously reasons over complex executive instructions (e.g. *"Restock everything that's running low from the fastest supplier"*), evaluates vendor lead times, and formulates replenishment purchase orders.
+4. **AWS Builder Layer (Amazon Bedrock)**: Autonomously reasons over complex executive instructions (e.g. *"Restock everything that's running low from the fastest supplier"*) using native Bedrock Converse tool use (`toolConfig`), enforces Python guardrails (single-supplier rule, one draft limit per request), and creates DRAFT purchase orders only, leaving confirmation as an explicit human step.
 5. **Interactive Web Chat Simulator (`/chat`)**: Provides an interactive browser demo path featuring Web Speech API voice input, speech synthesis output, and visual cards.
 6. **Reusable Standalone Adapter (`django-erp-mcp`)**: Extracted adapter package allowing **any Django application** to expose its models and actions as MCP tools with zero boilerplate.
 
@@ -48,7 +48,7 @@ flowchart TB
     subgraph Intelligence ["Intelligence & Safety Layer"]
         MCPServer["⚙️ MCP Server (26 Registered Tools)"]
         SessionMgr["🧠 VoiceSessionService<br/>Context Memory & Staged Actions"]
-        Bedrock["☁️ Amazon Bedrock (Nova Micro)"]
+        Bedrock["☁️ Amazon Bedrock (Nova Micro)<br/>Converse Tool-Use Loop"]
     end
 
     subgraph ERP ["ERP Core & Persistence (Django 5)"]
@@ -63,7 +63,8 @@ flowchart TB
     RESTBridge --> MCPServer
     MCPServer --> SessionMgr
     MCPServer --> Bedrock
-    Bedrock --> Services
+    Bedrock -- "Converse Tool Calls (Read & Draft Only)" --> Services
+    Services -- "toolResult" --> Bedrock
     MCPServer --> Services
     Services --> ORM --> Database
 ```
@@ -136,8 +137,8 @@ Use this step-by-step dialogue script to showcase the full range of voice featur
 | **2. Invoices** | *"What are my pending invoices for October?"* | *"You have 11 pending invoices for October totaling 802,000.50 rupees. Top customers are Delhivery Parcel Fleet, Zomato Logistics Hub. The full list is on your screen."* | Invoices Table Card with amounts in INR and status pills. |
 | **3. Context Follow-up** | *"and who are the top 3 customers for that?"* | *"For your pending invoices for October, the top 3 customers are Delhivery Parcel Fleet (182,500.00 rupees), Zomato Logistics Hub (137,500.00 rupees), Wipro Digital Solutions (125,000.50 rupees)."* | Top Customers Card utilizing session memory. |
 | **4. Inventory Alert** | *"Check low stock items"* | *"There are 6 items below reorder level, including High-Pressure Hydraulic Seal 50mm, Heavy-Duty Servo Motor 2HP. The full list is on your screen."* | Low Stock Alert Card with supplier lead times. |
-| **5. Bedrock Planner** | *"Restock everything that's running low from the fastest supplier"* | *"I reviewed low stock items. Reliance Industrial Polymers is the fastest supplier with a 4-day lead time. I drafted order DRAFT-PO-4 for 2 items. Would you like me to confirm it?"* | Bedrock Plan Card showing multi-step execution trace. |
-| **6. Confirm Action** | *"Confirm it"* *(or click button)* | *"Purchase order DRAFT-PO-4 for Reliance Industrial Polymers has been confirmed."* | Card transitions badge to emerald **`CONFIRMED`**. |
+| **5. Bedrock Planner** | *"Restock everything that's running low from the fastest supplier"* | *"I created draft DRAFT-PO-16 for 2 items from Reliance Industrial Polymers with a 4-day lead time. 4 other items remain low from slower suppliers; would you like to confirm?"* | Bedrock Plan Card showing execution steps, collapsible tool traces ("What the model did"), and confirmation button. |
+| **6. Confirm Action** | *"Confirm it"* *(or click button)* | *"Purchase order DRAFT-PO-16 for Reliance Industrial Polymers has been confirmed."* | Card transitions badge to emerald **`CONFIRMED`**. |
 | **7. HR Leave Approval** | *"Review pending leave requests"* &rarr; *"Approve leave for Rohan Verma"* | *"Rohan Verma has requested leave from 2026-10-10 to 2026-10-12 for 'Tax audit travel to Delhi office'. Should I confirm this approval?"* &rarr; *"Confirm it"* &rarr; *"Leave request for Rohan Verma from 2026-10-10 to 2026-10-12 has been confirmed and approved."* | Leave Card with inline **Approve** and **Reject** buttons. |
 
 ---
@@ -166,7 +167,7 @@ The server registers **26 tools** over Model Context Protocol (MCP) supporting s
 | `approve_leave` | `employee_name`, `confirm` *(bool)*, `session_id` | When `confirm=False`, checks request and asks for confirmation without altering database status. When `confirm=True`, marks status `approved`. |
 | `reject_leave` | `employee_name`, `reason`, `confirm` *(bool)*, `session_id` | When `confirm=False`, asks for confirmation. When `confirm=True`, records reason and marks status `rejected`. |
 | `confirm_action` | `session_id` | Universal confirmation handler when the user simply says *"confirm it"*. |
-| `plan_erp_replenishment` | `prompt`, `session_id` | Amazon Bedrock autonomous multi-step replenishment planner. |
+| `plan_erp_replenishment` | `prompt`, `session_id` | Amazon Bedrock Converse tool-use replenishment planner. Evaluates stock and lead times, enforces single-supplier rule, and creates **DRAFT** purchase orders only. Confirmation is strictly a human step. |
 
 ### 3. Direct Domain Management Tools (12 Tools)
 | Tool | Arguments | Description |
@@ -188,21 +189,32 @@ The server registers **26 tools** over Model Context Protocol (MCP) supporting s
 
 ## ⚡ AWS Builder Layer: Amazon Bedrock Planner
 
-- **Amazon Bedrock Foundation Model**: Configured with `amazon.nova-micro-v1:0` (via `BEDROCK_MODEL_ID` in `.env`) for low-latency reasoning and multi-step replenishment planning.
+- **Amazon Bedrock Foundation Model**: Configured with `amazon.nova-micro-v1:0` (via `BEDROCK_MODEL_ID` in `.env`) for native Converse tool-use reasoning and multi-step replenishment planning.
+- **Genuine Tool-Use Architecture**: In the live path (`AWS_MOCK_MODE=False`), Bedrock Converse receives `toolConfig` giving the model access **strictly** to:
+  - `get_low_stock_items` (read-only inventory inspection)
+  - `get_supplier_lead_times` (read-only vendor lead time evaluation)
+  - `draft_purchase_order(item_skus)` (creates DRAFT purchase orders only)
+- **Strict Safety Invariants**:
+  - **No Autonomous Confirmations**: `confirm_purchase_order`, `approve_leave`, and `reject_leave` are **never** exposed to the model. Confirmation is strictly a human-in-the-loop step.
+  - **Single-Supplier Rule**: Python guardrails reject any draft call whose SKUs span multiple suppliers.
+  - **Single Draft Limit**: At most ONE draft PO is permitted per planner request; subsequent calls are refused.
+  - **Quantity Capping**: Order quantities per line item are strictly capped (`MAX_QTY_PER_ITEM = 100`).
+  - **Staged State Alignment**: Staged pending draft in `VoiceSessionService` always matches the draft shown in the UI card.
+  - **Voice Speech Formatting**: Spoken response is strictly 2 sentences, under 45 words, plain text, with zero markdown, zero asterisks, and zero bullet lists.
 - **Connectivity Check**: Run `python -m aws_planner.check` to make a live test Converse call, verify latency, and validate credentials or inference profiles.
-- **Full AWS Documentation**: See [docs/AWS_USAGE.md](docs/AWS_USAGE.md) for IAM least-privilege policies, container deployment, and architectural sequence flows.
+- **Full AWS Documentation**: See [docs/AWS_USAGE.md](docs/AWS_USAGE.md) for IAM least-privilege policies, container deployment, and sequence diagrams.
 
 ### 🔍 Honest & Transparent Planner Modes (`AWS_MOCK_MODE`)
 
 Every response from the planner includes a transparent **`planner_mode`** field:
-- **`"bedrock"`**: Live Amazon Bedrock Converse API invocation succeeded.
-- **`"mock"`**: Default zero-cost mode (`AWS_MOCK_MODE=True`) executing deterministic planning simulation without calling AWS APIs.
-- **`"fallback"`**: Bedrock was requested (`AWS_MOCK_MODE=False`) but failed. The server logs a clear **`WARNING`** with the error reason, attaches `fallback_reason` to the response, and uses the local planner so ERP operations never halt.
+- **`"bedrock"`**: Live Amazon Bedrock Converse API invocation succeeded with genuine tool use.
+- **`"mock"`**: Default zero-cost mode (`AWS_MOCK_MODE=True`) executing deterministic planning simulation without calling AWS APIs. Default for all automated tests.
+- **`"fallback"`**: Bedrock was requested (`AWS_MOCK_MODE=False`) but failed, timed out, or made no valid tool calls. The server logs a clear **`WARNING`** with the error reason, attaches `fallback_reason` to the response, and uses the local planner so ERP operations never halt.
 
 #### What is Real vs. Mocked in Default Mode (`AWS_MOCK_MODE=True`):
 | Component | Status | Details |
 | :--- | :---: | :--- |
-| **Bedrock Foundation Model API** | **Mocked** | Simulated deterministic multi-step reasoning matching Bedrock execution trace. |
+| **Bedrock Foundation Model API** | **Mocked** | Simulated deterministic multi-step reasoning matching Bedrock execution trace. Default for automated test suites. |
 | **Inventory Database Query** | **100% Real** | Live Django ORM queries (`Item.objects.all()`) against SQLite database. |
 | **Supplier Lead Time Analysis** | **100% Real** | Real calculation comparing supplier lead times from live database records. |
 | **Purchase Order Creation** | **100% Real** | Creates actual draft Purchase Order records in SQLite via `draft_purchase_order()`. |
@@ -210,7 +222,7 @@ Every response from the planner includes a transparent **`planner_mode`** field:
 
 #### Web Chat UI Transparency:
 - Results display small status badges: **`Bedrock (live)`** (emerald), **`Mock mode`** (purple), or **`Fallback`** (amber with failure reason).
-- Headers and the Restock quick button **never say "Bedrock"** unless the active mode is live.
+- Headers and the Restock quick button **never say "Bedrock"** unless a live call has succeeded.
 
 ---
 
@@ -246,7 +258,7 @@ Run the complete test suite across all 13 test suites with pytest:
 python -m pytest -v
 ```
 
-All **85 tests** validate:
+All **98 tests** validate:
 - **Models**: `Customer`, `Supplier`, `Item`, `Invoice`, `PurchaseOrder`, `PurchaseOrderLine`, `Employee`, `LeaveRequest` (`tests/test_models.py`: **7 tests**)
 - **Data Seeding**: Realistic Indian demo data counts & idempotency (`tests/test_seed_command.py`: **2 tests**)
 - **Invoices**: Unpaid counts/totals, customer filtering, details, creation, validation, marking paid (`tests/test_invoices.py`: **6 tests**)
@@ -257,10 +269,10 @@ All **85 tests** validate:
 - **Voice MCP Tools**: Speech-friendly responses for pending invoices, overdue invoices, low stock items, pending leaves, sales summaries, and PO status (`tests/test_voice_mcp_tools.py`: **7 tests**)
 - **Voice Briefing & Async Domain Tools**: Executive morning briefing service and async MCP domain tools (`tests/test_voice_tools.py`: **3 tests**)
 - **Action Confirmation & Safety**: Draft-only creation, explicit confirmation, polite failure without draft, leave confirmation, session isolation (`tests/test_action_confirmation.py`: **8 tests**)
-- **AWS Bedrock Planner**: Environment config, fastest supplier optimization, multi-step plan generation, confirm-it flow, connectivity check command, and all 3 planner modes (mock, bedrock live, fallback error handling) (`tests/test_aws_planner.py`: **11 tests**)
+- **AWS Bedrock Planner**: Environment config, Converse tool-use loop happy path, single-supplier rule, second-draft refusal, unauthorized/confirm tool refusal, invalid SKU guardrail, speech length & no-markdown formatting, fastest supplier correctness, confirm shown draft, timeout fallback, error fallback, connectivity check command, and transparent planner modes (`tests/test_aws_planner.py`: **22 tests**)
 - **Web Chat Simulator**: HTML page serving, browser root routing, voice API endpoints, direct tool execution, transparent mode labels, explicit intent routing & polite fallback (`tests/test_web_chat.py`: **18 tests**)
 - **Standalone Package (`django-erp-mcp`)**: Model serialization, querying, tool registration, `@mcp_model` decorator (`django-erp-mcp/tests/test_adapter.py`: **4 tests**)
-- **Total**: **85 passed in ~12 seconds** (7 + 2 + 6 + 5 + 4 + 5 + 5 + 7 + 3 + 8 + 11 + 18 + 4 = 85).
+- **Total**: **98 passed in ~11 seconds** (7 + 2 + 6 + 5 + 4 + 5 + 5 + 7 + 3 + 8 + 22 + 18 + 4 = 98).
 
 ---
 

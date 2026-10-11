@@ -1,4 +1,4 @@
-"""AWS Layer for ERP Voice Agent (AWS Builder Challenge).
+"""AWS Layer for ERP Voice Agent.
 
 Integrates Amazon Bedrock Foundation Models to provide intelligent
 multi-step supply chain planning over Model Context Protocol (MCP).

@@ -1,7 +1,7 @@
 """Tests for the Amazon Bedrock ERP Planner Agent using Bedrock Converse Tool Use."""
 
 import pytest
-from erp_core.models import PurchaseOrder, Item
+from erp_core.models import PurchaseOrder, Item, Supplier
 from erp_core.services import VoiceSessionService
 from aws_planner.config import AWSConfig
 from aws_planner.agent import ERPPlannerAgent
@@ -133,9 +133,13 @@ def test_bedrock_tool_use_loop_happy_path(monkeypatch):
 
     monkeypatch.setenv("AWS_MOCK_MODE", "false")
 
-    # Get real low-stock items from DB
+    # Get real low-stock items from DB and group by supplier to select fastest supplier (single-supplier rule)
     all_low = [i for i in Item.objects.select_related("supplier").all() if i.is_below_reorder_level]
-    target_skus = [i.sku for i in all_low[:2]] if all_low else ["SKU-1001"]
+    suppliers_with_items = {}
+    for item in all_low:
+        suppliers_with_items.setdefault(item.supplier, []).append(item)
+    fastest_sup = min(suppliers_with_items.keys(), key=lambda s: s.lead_time_days)
+    target_skus = [i.sku for i in suppliers_with_items[fastest_sup]]
 
     mock_client = MagicMock()
 
@@ -204,7 +208,10 @@ def test_bedrock_tool_use_loop_happy_path(monkeypatch):
                         "role": "assistant",
                         "content": [
                             {
-                                "text": f"I analyzed inventory and created replenishment draft {created_draft_id} for {len(target_skus)} items. Would you like me to confirm it?"
+                                "text": (
+                                    f"I created draft {created_draft_id} for {len(target_skus)} items from {fastest_sup.name} with a {fastest_sup.lead_time_days}-day lead time. "
+                                    f"4 other items remain low from slower suppliers; would you like to confirm?"
+                                )
                             }
                         ],
                     }
@@ -219,10 +226,12 @@ def test_bedrock_tool_use_loop_happy_path(monkeypatch):
 
     result = ERPPlannerAgent.plan_and_execute(prompt=prompt, session_id=session_id)
 
-    # 1. Planner mode must be "bedrock"
+    # 1. Planner mode must be "bedrock" and title must not contain AWS Builder Challenge
     assert result["planner_mode"] == "bedrock"
     assert result["data"]["planner_mode"] == "bedrock"
     assert result["data"]["mock_mode"] is False
+    assert result["data"]["planner"] == "Amazon Bedrock ERP Planner"
+    assert "(AWS Builder Challenge)" not in result["data"]["planner"]
     assert AWSConfig.get_last_live_call() == "ok"
 
     # 2. Bedrock Converse call count
@@ -245,15 +254,26 @@ def test_bedrock_tool_use_loop_happy_path(monkeypatch):
         po = PurchaseOrder.objects.get(id=po_id)
         assert po.status == "draft"
 
-    # 5. Model final speech contains draft ID
-    assert draft_id.lower() in result["speech"].lower()
-    assert "confirm" in result["speech"].lower()
+    # 5. Voice speech must be under 45 words, 2 sentences, plain text, no markdown
+    speech = result["speech"]
+    assert draft_id.lower() in speech.lower()
+    assert "confirm" in speech.lower()
+    assert len(speech.split()) < 45
+    assert "*" not in speech
+    assert "#" not in speech
+    assert "_" not in speech
+    assert "\n" not in speech
 
-    # 6. Session staged for confirmation
+    # 6. Session staged for confirmation matches shown draft
     pending = VoiceSessionService.get_pending_action(session_id)
     assert pending is not None
     assert pending["type"] == "confirm_purchase_order"
     assert pending["draft_id"] == draft_id
+    assert pending["po_ids"] == result["data"]["po_ids"]
+
+    # 7. fastest_supplier matches chosen supplier
+    assert result["data"]["fastest_supplier"]["name"] == fastest_sup.name
+    assert result["data"]["fastest_supplier"]["lead_time_days"] == fastest_sup.lead_time_days
 
 
 @pytest.mark.django_db(transaction=True)
@@ -614,3 +634,178 @@ def test_bedrock_runtime_client_explicit_timeouts_and_retries(monkeypatch):
     assert cfg.connect_timeout == 5
     assert cfg.read_timeout == 20
     assert cfg.retries.get("max_attempts") == 2
+
+
+@pytest.mark.django_db(transaction=True)
+def test_single_supplier_rule_rejected():
+    """Verify draft_purchase_order rejects SKUs belonging to more than one supplier."""
+    from aws_planner.tools import execute_planner_tool
+
+    # Select two items from distinct suppliers
+    items = list(Item.objects.select_related("supplier").all())
+    item_a = items[0]
+    item_b = next(it for it in items if it.supplier_id != item_a.supplier_id)
+
+    mixed_skus = [item_a.sku, item_b.sku]
+    res, step_text, draft_info = execute_planner_tool(
+        tool_name="draft_purchase_order",
+        tool_input={"item_skus": mixed_skus},
+        session_id="test_single_supplier_rejection_session",
+    )
+
+    assert "error" in res
+    assert "Single-supplier rule violation" in res["error"]
+    assert "multiple suppliers" in res["error"].lower()
+    assert draft_info is None
+    assert "Refused" in step_text
+
+
+@pytest.mark.django_db(transaction=True)
+def test_second_draft_refused():
+    """Verify at most ONE draft purchase order is permitted per planner request."""
+    from aws_planner.tools import execute_planner_tool
+
+    session_id = "test_second_draft_refusal_session"
+    VoiceSessionService.reset()
+    session = VoiceSessionService.get_session(session_id)
+    session["planner_draft_created"] = False
+
+    # Get SKUs from a single supplier
+    supplier = Supplier.objects.first()
+    supplier_items = list(Item.objects.filter(supplier=supplier))
+    skus = [it.sku for it in supplier_items[:2]]
+
+    # First call: succeeds
+    res1, step1, draft1 = execute_planner_tool(
+        tool_name="draft_purchase_order",
+        tool_input={"item_skus": skus},
+        session_id=session_id,
+    )
+    assert res1.get("success") is True
+    assert draft1 is not None
+    first_draft_id = draft1["draft_id"]
+
+    # Second call within the same session: refused
+    res2, step2, draft2 = execute_planner_tool(
+        tool_name="draft_purchase_order",
+        tool_input={"item_skus": skus},
+        session_id=session_id,
+    )
+    assert "error" in res2
+    assert "Only one draft purchase order is permitted" in res2["error"]
+    assert draft2 is None
+    assert "Refused second draft_purchase_order" in step2
+
+    # Staged draft remains the first draft
+    staged = VoiceSessionService.get_pending_action(session_id)
+    assert staged["draft_id"] == first_draft_id
+
+
+def test_voice_speech_formatting_strips_markdown_and_enforces_length():
+    """Verify build_voice_speech generates plain text, <= 45 words, 2 sentences, with zero markdown or asterisks."""
+    from aws_planner.agent import build_voice_speech
+
+    # Case 1: Model text containing asterisks, markdown bold, and numbered lists
+    markdown_model_text = (
+        "**Purchase Order Drafted!** Here is the breakdown:\n"
+        "* 1. Item SKU-1001: 10 units\n"
+        "* 2. Item SKU-1002: 20 units\n"
+        "Draft ID: DRAFT-PO-5. Would you like me to confirm this order now?"
+    )
+    speech1 = build_voice_speech(
+        model_text=markdown_model_text,
+        draft_id="DRAFT-PO-5",
+        supplier_name="Reliance Industrial Polymers",
+        lead_time_days=4,
+        item_count=2,
+        other_low_count=4,
+    )
+    # Must have fallen back to clean 2-sentence template
+    assert "*" not in speech1
+    assert "#" not in speech1
+    assert "_" not in speech1
+    assert "\n" not in speech1
+    assert len(speech1.split()) < 45
+    assert "DRAFT-PO-5" in speech1
+    assert "4 other items remain low" in speech1
+
+    # Case 2: Model text longer than 45 words
+    long_model_text = (
+        "I have carefully reviewed all warehouse inventory items and examined supplier lead times across all registered vendors. "
+        "I identified that Reliance Industrial Polymers offers the fastest delivery schedule with a four day turnaround. "
+        "Therefore I drafted order DRAFT-PO-5 containing all low stock items from them. "
+        "Would you like me to confirm this purchase order now?"
+    )
+    assert len(long_model_text.split()) >= 45
+    speech2 = build_voice_speech(
+        model_text=long_model_text,
+        draft_id="DRAFT-PO-5",
+        supplier_name="Reliance Industrial Polymers",
+        lead_time_days=4,
+        item_count=2,
+        other_low_count=4,
+    )
+    assert len(speech2.split()) < 45
+    assert "DRAFT-PO-5" in speech2
+
+    # Case 3: Clean model text under 45 words with exactly 2 sentences
+    clean_text = (
+        "I drafted order DRAFT-PO-5 for 2 items from Reliance Industrial Polymers with a 4-day lead time. "
+        "4 other items remain low from slower suppliers; would you like to confirm?"
+    )
+    speech3 = build_voice_speech(
+        model_text=clean_text,
+        draft_id="DRAFT-PO-5",
+        supplier_name="Reliance Industrial Polymers",
+        lead_time_days=4,
+        item_count=2,
+        other_low_count=4,
+    )
+    assert speech3 == clean_text
+    assert len(speech3.split()) < 45
+
+
+@pytest.mark.django_db(transaction=True)
+def test_fastest_supplier_minimum_lead_time():
+    """Verify data.fastest_supplier equals the minimum lead time among low-stock suppliers."""
+    session_id = "test_fastest_supplier_lead_time_check"
+    prompt = "Restock everything that's running low from the fastest supplier"
+
+    result = ERPPlannerAgent.plan_and_execute(prompt=prompt, session_id=session_id)
+    data = result["data"]
+
+    # Calculate true minimum lead time among all low-stock suppliers
+    all_low = [i for i in Item.objects.select_related("supplier").all() if i.is_below_reorder_level]
+    low_suppliers = {i.supplier for i in all_low}
+    min_lead_time = min(s.lead_time_days for s in low_suppliers)
+    min_supplier = min(low_suppliers, key=lambda s: s.lead_time_days)
+
+    assert data["fastest_supplier"] is not None
+    assert data["fastest_supplier"]["lead_time_days"] == min_lead_time
+    assert data["fastest_supplier"]["name"] == min_supplier.name
+    # Verify planner label does not contain AWS Builder Challenge
+    assert "(AWS Builder Challenge)" not in data["planner"]
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.asyncio
+async def test_confirm_confirms_the_shown_draft():
+    """Verify confirming via session confirms the exact draft shown to the user."""
+    session_id = "test_confirm_shown_draft_session"
+    prompt = "Restock everything that's running low from the fastest supplier"
+
+    result = await plan_erp_replenishment(prompt=prompt, session_id=session_id)
+    shown_draft_id = result["data"]["draft_id"]
+    shown_po_ids = result["data"]["po_ids"]
+    assert shown_draft_id is not None
+    assert len(shown_po_ids) == 1
+
+    # Confirm action
+    confirm_res = await confirm_action(session_id=session_id)
+    assert confirm_res["data"]["success"] is True
+    assert confirm_res["data"]["draft_id"] == shown_draft_id
+
+    # Verify database PO status
+    po = await PurchaseOrder.objects.aget(id=shown_po_ids[0])
+    assert po.status == "confirmed"
+

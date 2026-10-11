@@ -52,6 +52,8 @@ BEDROCK_PLANNER_TOOL_SPECS = [
             "name": "draft_purchase_order",
             "description": (
                 "Create a DRAFT replenishment purchase order for the specified item SKUs. "
+                "All item SKUs must belong to the exact same supplier (single-supplier rule). "
+                "Can be called at most once per replenishment request. "
                 "This strictly creates draft orders awaiting human confirmation. Does NOT confirm or place orders."
             ),
             "inputSchema": {
@@ -120,12 +122,27 @@ def execute_draft_purchase_order(
     """Draft purchase orders with strict Python validation and guardrails.
 
     Guardrails:
-    1. Validates that item_skus is a non-empty list of strings.
-    2. Validates that every requested SKU exists in the inventory database.
-    3. Allows only DRAFT status creation.
-    4. Caps order quantity per item line (MAX_QTY_PER_ITEM).
-    5. Stages the draft order in the session state for human confirmation.
+    1. Rejects call if a draft PO has already been created in this planner request (at most 1 draft per request).
+    2. Validates that item_skus is a non-empty list of strings.
+    3. Validates that every requested SKU exists in the inventory database.
+    4. Single-supplier rule: rejects calls where SKUs belong to more than one supplier.
+    5. Allows only DRAFT status creation.
+    6. Caps order quantity per item line (MAX_QTY_PER_ITEM = 100).
+    7. Stages the draft order in the session state for human confirmation.
     """
+    session = VoiceSessionService.get_session(session_id)
+
+    # Guardrail 1: Allow at most ONE draft PO per planner request
+    if session.get("planner_draft_created", False):
+        return (
+            {
+                "error": "Only one draft purchase order is permitted per replenishment request. A second draft call is refused."
+            },
+            "Step: Refused second draft_purchase_order (limit: at most one draft PO per request).",
+            None,
+        )
+
+    # Guardrail 2: Validate item_skus argument type and content
     if not isinstance(item_skus, list) or not item_skus:
         return (
             {"error": "Invalid argument: 'item_skus' must be a non-empty list of string SKUs."},
@@ -133,7 +150,7 @@ def execute_draft_purchase_order(
             None,
         )
 
-    # 1. Validate all SKUs exist in database
+    # Guardrail 3: Validate all SKUs exist in database
     existing_items = list(Item.objects.filter(sku__in=item_skus).select_related("supplier"))
     existing_skus = {it.sku for it in existing_items}
     missing_skus = [sku for sku in item_skus if sku not in existing_skus]
@@ -147,33 +164,44 @@ def execute_draft_purchase_order(
             None,
         )
 
-    # Group items by supplier
-    supplier_map: Dict[Any, List[Item]] = {}
-    for item in existing_items:
-        supplier_map.setdefault(item.supplier, []).append(item)
+    # Guardrail 4: Single-supplier rule (reject if SKUs belong to more than one supplier)
+    suppliers = {it.supplier for it in existing_items}
+    if len(suppliers) > 1:
+        supplier_names = sorted([s.name for s in suppliers])
+        return (
+            {
+                "error": (
+                    f"Single-supplier rule violation: Provided SKUs belong to multiple suppliers ({supplier_names}). "
+                    f"All SKUs in a single draft order must belong to exactly one supplier."
+                ),
+                "suppliers_found": supplier_names,
+            },
+            f"Step: Refused draft_purchase_order (SKUs span multiple suppliers: {supplier_names}).",
+            None,
+        )
 
-    created_pos: List[PurchaseOrder] = []
+    supplier = list(suppliers)[0]
     total_qty = 0
 
     with transaction.atomic():
-        for supplier, sup_items in supplier_map.items():
-            # Strict Guardrail: Always create with status='draft'
-            po = PurchaseOrder.objects.create(supplier=supplier, status="draft")
-            for it in sup_items:
-                calc_qty = max(it.reorder_level * 2 - it.stock_qty, it.reorder_level, 10)
-                # Strict Guardrail: Cap order quantity per line item
-                capped_qty = min(calc_qty, MAX_QTY_PER_ITEM)
-                PurchaseOrderLine.objects.create(po=po, item=it, qty=capped_qty)
-                total_qty += capped_qty
-            created_pos.append(po)
+        # Guardrail 5: Always create with status='draft'
+        po = PurchaseOrder.objects.create(supplier=supplier, status="draft")
+        for it in existing_items:
+            calc_qty = max(it.reorder_level * 2 - it.stock_qty, it.reorder_level, 10)
+            # Guardrail 6: Cap order quantity per line item
+            capped_qty = min(calc_qty, MAX_QTY_PER_ITEM)
+            PurchaseOrderLine.objects.create(po=po, item=it, qty=capped_qty)
+            total_qty += capped_qty
 
-    primary_id = created_pos[0].id
+    # Mark draft as created so second draft call in same request is refused
+    session["planner_draft_created"] = True
+
+    primary_id = po.id
     draft_id = f"DRAFT-PO-{primary_id}"
-    po_ids = [p.id for p in created_pos]
-    supplier_names = [s.name for s in supplier_map.keys()]
+    po_ids = [po.id]
+    supplier_names = [supplier.name]
 
-    # Strict Guardrail: Stage draft in session exactly as required for confirmation
-    session = VoiceSessionService.get_session(session_id)
+    # Guardrail 7: Stage draft in session exactly as required for confirmation
     session["last_draft_id"] = draft_id
     session["last_draft_po_ids"] = po_ids
     VoiceSessionService.set_context(
@@ -195,16 +223,16 @@ def execute_draft_purchase_order(
         },
     )
 
-    fastest_supplier = min(supplier_map.keys(), key=lambda s: s.lead_time_days)
+    fastest_supplier = {
+        "name": supplier.name,
+        "lead_time_days": supplier.lead_time_days,
+        "phone": supplier.phone,
+    }
     draft_details = {
         "draft_id": draft_id,
         "po_ids": po_ids,
         "suppliers": supplier_names,
-        "fastest_supplier": {
-            "name": fastest_supplier.name,
-            "lead_time_days": fastest_supplier.lead_time_days,
-            "phone": fastest_supplier.phone,
-        },
+        "fastest_supplier": fastest_supplier,
         "items_count": len(existing_items),
         "total_quantity": total_qty,
         "items": [
@@ -221,7 +249,7 @@ def execute_draft_purchase_order(
 
     step_text = (
         f"Step: Called draft_purchase_order(item_skus={item_skus}). "
-        f"Created draft {draft_id} for {len(existing_items)} items from {', '.join(supplier_names)} "
+        f"Created draft {draft_id} for {len(existing_items)} items from {supplier.name} "
         f"(Total Qty: {total_qty}). Staged in session for user confirmation."
     )
 
